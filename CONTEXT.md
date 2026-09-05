@@ -2,6 +2,12 @@
 
 這個 repo 收納可獨立安裝的 skills 與 prompt。Review workflow 以 `/base` 固定工作起點，再由不同 review variant 檢查變更。
 
+## Prompts
+
+**本地改編 prompt**：
+Workflow Pack 中參考外部來源、翻譯並依本地偏好調整的 prompt；其內容由本地維護者決定。
+_Avoid_: 上游同步副本、逐字翻譯版
+
 ## Baseline
 
 **Base manifest**：由 `/base` 建立的固定 review 起點與 task source。
