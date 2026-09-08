@@ -1,6 +1,9 @@
 {
-  "providers": {"ocr": true, "headroom": false},
-  "grants": {"ocr": ["workspace-read", "local-state", "llm-network"]},
+  "providers": {"ocr": true, "headroom": false, "plane-linear-sync": false},
+  "grants": {
+    "ocr": ["workspace-read", "local-state", "llm-network"],
+    "plane-linear-sync": ["local-state", "external-network"]
+  },
   "llm_endpoint": null,
   "prompts": ["prompt_i-hava-adhd.zh-tw.md"],
   "extensions": []

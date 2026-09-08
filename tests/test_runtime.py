@@ -1,15 +1,15 @@
 import argparse
 import io
-from pathlib import Path
-import subprocess
 import socket
+import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from ade import core, cli
+from ade import cli, core
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,16 +20,16 @@ class RuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             response = io.BytesIO(b"corrupted artifact")
             response.url = "https://example.com/binary"
-            with patch("urllib.request.urlopen", return_value=response):
-                with self.assertRaisesRegex(core.Error, "checksum mismatch"):
-                    core.download(response.url, "0" * 64, Path(temp) / "binary")
+            with patch("urllib.request.urlopen", return_value=response), \
+                 self.assertRaisesRegex(core.Error, "checksum mismatch"):
+                core.download(response.url, "0" * 64, Path(temp) / "binary")
 
     def test_health_rejects_wrong_version(self):
         p = core.read(ROOT / "ade.lock.json")["providers"][0]
         result = subprocess.CompletedProcess([], 0, "ocr version 1.11.40", "")
-        with patch("subprocess.run", return_value=result):
-            with self.assertRaisesRegex(core.Error, "version"):
-                core.health(p, Path("/tmp/release"))
+        with patch("subprocess.run", return_value=result), \
+             self.assertRaisesRegex(core.Error, "version"):
+            core.health(p, Path("/tmp/release"))
 
     def test_review_uses_resolved_range_and_explicit_endpoint(self):
         lock = core.read(ROOT / "ade.lock.json")
@@ -106,6 +106,25 @@ class RuntimeTests(unittest.TestCase):
                 child.wait(timeout=10)
             with self.assertRaises(OSError):
                 socket.create_connection(("127.0.0.1", port), timeout=0.2)
+
+    def test_doctor_reports_missing_sync_credentials_without_network(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            release = root / "releases/test"
+            release.mkdir(parents=True)
+            (root / "current").symlink_to("releases/test")
+            lock = core.read(ROOT / "ade.lock.json")
+            provider = next(item for item in lock["providers"] if item["id"] == "plane-linear-sync")
+            core.write(release / "config.json", {
+                "providers": {"plane-linear-sync": True},
+                "manifests": {"plane-linear-sync": provider},
+                "grants": {"plane-linear-sync": provider["permissions"]},
+                "llm_endpoint": None,
+            })
+            with patch.dict("os.environ", {}, clear=True):
+                result = cli.doctor(root)
+        self.assertEqual(result["plane-linear-sync"]["status"], "blocked")
+        self.assertIn("PLANE_API_TOKEN", result["plane-linear-sync"]["reason"])
 
 
 if __name__ == "__main__":

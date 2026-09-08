@@ -1,10 +1,9 @@
 import copy
-import json
-from pathlib import Path
 import subprocess
 import tempfile
 import tomllib
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from ade import core
@@ -60,6 +59,20 @@ class CompositionTests(unittest.TestCase):
         self.assertNotIn("SECRET_KEY", env)
         self.assertNotIn("OPENAI_API_KEY", env)
 
+    def test_builtin_sync_provider_is_authorized_without_running_a_binary(self):
+        config = core.compose(self.lock, {
+            "providers": {"ocr": False, "plane-linear-sync": True},
+            "grants": {"plane-linear-sync": ["local-state", "external-network"]},
+        }, {})
+        provider = core.authorize(config, "plane-linear-sync")
+        self.assertTrue(provider["builtin"])
+        self.assertEqual(core.health(provider, "/tmp/release"), "ok")
+
+    def test_user_extensions_cannot_take_over_builtin_runtime_names(self):
+        provider = dict(self.lock["providers"][-1])
+        with self.assertRaisesRegex(core.Error, "builtin"):
+            core.compose(self.lock, {"extensions": [provider]}, {})
+
 
 class InstallTests(unittest.TestCase):
     def setUp(self):
@@ -106,9 +119,9 @@ class InstallTests(unittest.TestCase):
         current = core.generation(self.root)
         enabled = copy.deepcopy(self.config)
         enabled["providers"]["ocr"] = True
-        with patch("ade.core.download", side_effect=core.Error("artifact checksum mismatch")):
-            with self.assertRaisesRegex(core.Error, "checksum"):
-                core.install(self.lock, enabled, self.root, self.repo)
+        with patch("ade.core.download", side_effect=core.Error("artifact checksum mismatch")), \
+             self.assertRaisesRegex(core.Error, "checksum"):
+            core.install(self.lock, enabled, self.root, self.repo)
         self.assertEqual(core.generation(self.root), current)
         self.assertFalse(list((self.root / "releases").glob(".stage-*")))
 
@@ -122,6 +135,14 @@ class InstallTests(unittest.TestCase):
         with self.assertRaisesRegex(core.Error, "unknown Workflow Pack"):
             core.install(self.lock, config, self.root, self.repo)
         self.assertIsNone(core.generation(self.root))
+
+    def test_builtin_sync_provider_can_be_installed_without_credentials(self):
+        config = copy.deepcopy(self.config)
+        config["providers"]["plane-linear-sync"] = True
+        config["grants"]["plane-linear-sync"] = ["local-state", "external-network"]
+        result = core.install(self.lock, config, self.root, self.repo)
+        installed = core.read(Path(result["generation"]) / "config.json")
+        self.assertTrue(installed["providers"]["plane-linear-sync"])
 
     def test_monorepo_bundle_and_stale_content(self):
         self.lock["workflow"]["source"] = "bundled"

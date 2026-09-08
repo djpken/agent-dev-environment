@@ -1,15 +1,14 @@
 """Non-destructive workspace attachment for supported agent hosts."""
 
 import json
-from collections.abc import MutableMapping
 import os
-from pathlib import Path
 import tempfile
+from collections.abc import MutableMapping
+from pathlib import Path
 
 import tomlkit
 
 from . import core
-
 
 HOSTS = {
     "claude": (".mcp.json", "claude.mcp.json", "mcpServers", ".claude/skills"),

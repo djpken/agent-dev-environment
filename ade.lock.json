@@ -28,7 +28,21 @@
       "lifecycle": "host-spawned", "transport": "stdio",
       "command": ["headroom", "mcp", "serve"], "health": ["headroom", "--version"],
       "permissions": ["local-state"]
+    },
+    {
+      "id": "plane-linear-sync", "version": "0.1.0", "capabilities": ["issue-sync"],
+      "lifecycle": "host-spawned", "transport": "cli", "builtin": true,
+      "command": ["{release}/bin/plane-linear-sync"],
+      "health": ["{release}/bin/plane-linear-sync", "--version"],
+      "permissions": ["local-state", "external-network"],
+      "env_vars": [
+        "PLANE_API_URL", "PLANE_API_TOKEN", "PLANE_WORKSPACE_SLUG", "PLANE_ASSIGNEE_ID",
+        "PLANE_ASSIGNEE_EMAIL", "PLANE_ISSUES_URL", "PLANE_PROJECT_ID", "PLANE_LINEAR_PROJECT_MAP",
+        "PLANE_LINEAR_STATUS_MAP", "PLANE_LINEAR_TIMEOUT", "LINEAR_API_URL", "LINEAR_API_KEY",
+        "LINEAR_TEAM_ID", "LINEAR_ASSIGNEE_ID", "LINEAR_PROJECT_ID"
+      ],
+      "schedule": {"times": ["08:00", "12:00", "17:00"], "timezone": "local"}
     }
   ],
-  "defaults": {"providers": {"ocr": true, "headroom": false}, "prompts": []}
+  "defaults": {"providers": {"ocr": true, "headroom": false, "plane-linear-sync": false}, "prompts": []}
 }

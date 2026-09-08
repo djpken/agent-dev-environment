@@ -17,7 +17,7 @@ uv run --frozen ade apply --user user.example.json --plan-id <plan_id>
 uv run --frozen ade doctor
 ```
 
-使用與限制見 [ADE runtime](./docs/ade-runtime.md)，職責分工見 [責任表](./docs/ade-responsibilities.md)。`user.example.json` 未設定 LLM endpoint，因此模型 review 會保持 blocked；credentials 不寫入 repository。
+使用與限制見 [ADE runtime](./docs/ade-runtime.md)、[Plane 到 Linear 同步](./docs/ade-plane-linear-sync.md)，職責分工見 [責任表](./docs/ade-responsibilities.md)。`user.example.json` 未設定 LLM endpoint，因此模型 review 會保持 blocked；credentials 不寫入 repository。
 
 ## 模組邊界
 
@@ -26,7 +26,8 @@ uv run --frozen ade doctor
 | `skills/`、`prompt/` | 工作方法、MCP 使用政策、結果處理 |
 | `ade/core.py` | Bundle、設定合併、plan/apply、rollback |
 | `ade/hosts.py` | Host 設定轉換與 workspace attach |
-| `ade/cli.py` | CLI、review adapter 與 process lifecycle |
+| `ade/cli.py` | CLI、review adapter、sync 入口與 process lifecycle |
+| `ade/sync.py`、`ade/scheduler.py` | Plane 到 Linear reconciliation、local state 與 user-level schedule |
 | `ade.lock.json`、`ade/provider.schema.json` | Provider 版本、能力、權限與健康檢查契約 |
 | `tests/` | Runtime 與 host 整合驗證 |
 

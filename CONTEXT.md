@@ -1,6 +1,6 @@
 # Agent development environment context
 
-這個 monorepo 收納 Agent Development Environment 的 runtime、skills 與 prompt，並定義環境與 review workflow 語言。
+這個 monorepo 收納 Agent Development Environment 的 runtime、skills 與 prompt，並定義環境、issue synchronization 與 review workflow 語言。
 
 ## Environment
 
@@ -36,10 +36,29 @@ _Avoid_: MCP config、plugin metadata
 負責程式碼分析、coverage 與 structured findings 的 Capability provider。
 _Avoid_: code-review skill、review workflow
 
+## ADE issue synchronization
+
+**Plane issue**：公司 Plane 中的原始工作項目，也是同步資料的來源。
+_Avoid_: ticket、mirror issue
+
+**Linear issue**：個人 Linear workspace 中追蹤 Plane issue 的工作項目。
+_Avoid_: copy、duplicate issue
+
+**Source identity**：由來源 provider、workspace 與 Plane issue ID 組成，能在多次同步與本機 state 遺失後辨識同一個 Plane issue 的穩定身份。
+_Avoid_: title matching、display identifier
+
+**Assignment scope**：目前指派給指定使用者的 Plane issues。仍在此範圍內的 completed 或 canceled issue 也屬於同步來源；解除指派後不再產生新的 Linear 更新。
+_Avoid_: all issues、active-only issues
+
+**Sync run**：一次手動或排程觸發的 Plane issue 讀取與 Linear reconciliation。
+_Avoid_: batch、job
+
+**Source trace**：Linear issue 中可回到 Plane 原始 issue 的 URL、identifier 與 project 資訊。
+_Avoid_: backlink、provenance blob
+
 ## Prompts
 
-**本地改編 prompt**：
-Workflow Pack 中參考外部來源、翻譯並依本地偏好調整的 prompt；其內容由本地維護者決定。
+**本地改編 prompt**：Workflow Pack 中參考外部來源、翻譯並依本地偏好調整的 prompt；其內容由本地維護者決定。
 _Avoid_: 上游同步副本、逐字翻譯版
 
 ## Baseline

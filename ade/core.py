@@ -7,7 +7,6 @@ import hashlib
 import io
 import json
 import os
-from pathlib import Path
 import platform
 import re
 import shutil
@@ -16,8 +15,9 @@ import sys
 import tarfile
 import tempfile
 import urllib.request
-from urllib.parse import urlparse
 import uuid
+from pathlib import Path
+from urllib.parse import urlparse
 
 from jsonschema import Draft202012Validator
 
@@ -63,8 +63,11 @@ def compose(lock, user, workspace):
     check(set(user) <= {"providers", "prompts", "grants", "llm_endpoint", "extensions"},
           "unknown user config field")
     providers = {}
-    for value in lock["providers"] + user.get("extensions", []):
+    locked_providers = len(lock["providers"])
+    for position, value in enumerate(lock["providers"] + user.get("extensions", [])):
         value = manifest(copy.deepcopy(value))
+        check(not value.get("builtin") or position < locked_providers,
+              "user extensions may not declare builtin providers")
         check(value["id"] not in providers, "duplicate provider namespace: " + value["id"])
         providers[value["id"]] = value
     result = copy.deepcopy(lock["defaults"])
@@ -218,17 +221,20 @@ def argv(provider, release, health=False):
     return [arg.replace("{release}", str(release)) for arg in values]
 
 
-def clean_env(provider):
+def clean_env(provider, environment=None):
     allowed = {"PATH", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT"}
     allowed.update(provider.get("env_vars", []))
     # Keep HOME for provider-owned local state; never persist environment secrets.
     allowed.add("HOME")
-    return {key: value for key, value in os.environ.items() if key in allowed}
+    source = os.environ if environment is None else environment
+    return {key: value for key, value in source.items() if key in allowed}
 
 
 def health(provider, release):
+    if provider.get("builtin"):
+        return "ok"
     output = subprocess.run(argv(provider, release, health=True), capture_output=True,
-                            timeout=20, env=clean_env(provider), text=True)
+                            timeout=20, env=clean_env(provider), text=True, check=False)
     check(output.returncode == 0, "health command failed: " + provider["id"])
     text = output.stdout + output.stderr
     check(re.search(r"(?<![0-9.])" + re.escape(provider["version"]) + r"(?![0-9.])", text),
@@ -299,7 +305,8 @@ def install(lock, config, root, repository, expected_plan=None):
                     health(provider, stage)
                 else:
                     authorize(config, name)
-                    health(provider, stage)
+                    if not provider.get("builtin"):
+                        health(provider, stage)
             parts = []
             for name in config["prompts"]:
                 path = stage / "workflow" / "prompt" / name

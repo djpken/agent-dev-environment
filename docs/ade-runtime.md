@@ -1,6 +1,6 @@
 # Agent Development Environment
 
-個人開發者的 local-first ADE monorepo。Workflow Pack 位於同 repo 的 `skills/` 與 `prompt/`；`ade/` 管理版本、安裝、設定、provider grants 與 host adapter 輸出。
+個人開發者的 local-first ADE monorepo。Workflow Pack 位於同 repo 的 `skills/` 與 `prompt/`；`ade/` 管理版本、安裝、設定、provider grants、host adapter 輸出、issue sync 與 user-level schedule。
 
 目前為 `0.1.0`，支援 Linux/macOS、Python 3.11 以上與 Git。使用 `uv.lock` 固定 ADE 的 Python 相依。Windows 尚未實作原子 symlink 切換與 process lifecycle。
 
@@ -23,6 +23,19 @@ uv run --frozen ade rollback
 
 `user.example.json` 是設定範本。實際設定請使用被 Git 忽略的 `user.json`；只有 `providers` 與 `prompts` 可放進 `--workspace-config`。Workspace 無法改寫 grants、endpoint 或註冊 extension command。
 
+## Plane 到 Linear
+
+啟用 `plane-linear-sync` 後，用 repo 外的 owner-only env file 手動執行：
+
+```bash
+uv run --frozen ade sync --provider plane-linear-sync --env-file ~/.config/ade/plane-linear-sync.env
+uv run --frozen ade schedule install --provider plane-linear-sync --env-file ~/.config/ade/plane-linear-sync.env --enable
+```
+
+排程由 `ade/scheduler.py` 渲染 systemd user timer 或 macOS launchd，時間固定為 `08:00`、`12:00`、`17:00` 的 local timezone。排程 command 只包含 env file path，不含 token。同步的 mapping 與 JSONL run record 位於 `~/.local/share/ade/state/plane-linear-sync/`，檔案權限由 runtime 設為 owner-only。
+
+完整欄位、狀態、credential 與錯誤規則見 [ADE Plane 到 Linear 同步](./ade-plane-linear-sync.md)。
+
 ## 元件
 
 | 元件 | 本版行為 |
@@ -30,6 +43,7 @@ uv run --frozen ade rollback
 | Workflow Pack | 從 monorepo 打包，以內容 digest 驗證 plan，保留原本 skill 內容 |
 | OCR | 安裝官方 `1.11.4` binary，支援四種 Linux/macOS 架構 |
 | Headroom | `0.36.5` manifest，預設關閉；啟用前需有相同版本的 CLI |
+| Plane 到 Linear | `plane-linear-sync` provider，預設關閉；依指派範圍同步到個人 Linear workspace |
 | Claude Code | `current/exports/claude.mcp.json` |
 | Codex | `current/exports/codex.toml` |
 | OpenCode | `current/exports/opencode.json` |
@@ -60,7 +74,7 @@ Adapter 將 refs 解析成完整 commit SHA，要求 base 為 head 的 ancestor�
 
 ## 擴充與 lifecycle
 
-User config 的 `extensions` 接受符合 `ade/provider.schema.json` 的 manifests。ID 必須唯一；command/health 使用 argv array，不經 shell。可用 permissions 為 `workspace-read`、`workspace-write`、`local-state`、`llm-network`、`listen-loopback`。
+User config 的 `extensions` 接受符合 `ade/provider.schema.json` 的 manifests。ID 必須唯一；command/health 使用 argv array，不經 shell。可用 permissions 為 `workspace-read`、`workspace-write`、`local-state`、`llm-network`、`external-network`、`listen-loopback`。
 
 - `host-spawned`：`ade provider <id>` 驗證 grants 與版本後交接 process，host 擁有其生命周期。
 - `shared-local`：`ade provider <id> --shared` 前景監督一個 loopback HTTP process，檢查 readiness、轉送停止訊號並回收 child；host 只連接 manifest URL。同一 endpoint 已使用時拒絕啟動。
@@ -79,7 +93,7 @@ OCR endpoint 由 adapter 明確傳入；第三方 provider 必須自行遵守資
 uv run --frozen python -m unittest discover -s tests -v
 ```
 
-測試包含設定合併、提權阻擋、manifest 驗證、下載損壞、version mismatch、失敗保留 current、過期 plan、rollback、三種 host 設定格式、環境變數過濾與 review range/endpoint mapping。
+測試包含設定合併、提權阻擋、manifest 驗證、下載損壞、version mismatch、失敗保留 current、過期 plan、rollback、三種 host 設定格式、環境變數過濾、review range/endpoint mapping、Plane/Linear mapping、排程與同步錯誤隔離。
 
 官方介面依據：
 
