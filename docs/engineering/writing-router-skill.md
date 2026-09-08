@@ -1,14 +1,14 @@
 Quickstart:
 
 ```bash
-npx skills add djpken/skills --skill=writing-router-skill
+npx skills add djpken/agent-dev-environment --skill=writing-router-skill
 ```
 
 ```bash
 npx skills update writing-router-skill
 ```
 
-[Source](https://github.com/djpken/skills/tree/main/skills/engineering/writing-router-skill)
+[Source](https://github.com/djpken/agent-dev-environment/tree/main/skills/engineering/writing-router-skill)
 
 ## What it does
 

@@ -1,0 +1,7 @@
+{
+  "providers": {"ocr": true, "headroom": false},
+  "grants": {"ocr": ["workspace-read", "local-state", "llm-network"]},
+  "llm_endpoint": null,
+  "prompts": ["prompt_i-hava-adhd.zh-tw.md"],
+  "extensions": []
+}

@@ -6,7 +6,7 @@ Most of these skills are **user-invoked**: the agent will never fire them for yo
 
 Act whenever a promoted skill is added, renamed, or has its behaviour changed: create or re-sync its docs page. A rename moves the file too (`docs/<bucket>/<old>.md` → `docs/<bucket>/<new>.md`), because the published URL tracks the name; a skill that moves between `engineering/` and `productivity/` moves its docs file to the matching folder. Skills in `misc/`, `personal/`, `in-progress/`, and `deprecated/` get no page — none of those buckets is promoted. A skill moving *out* of one of them into `engineering/` or `productivity/` gains a page; one moving the other way loses it.
 
-Because these pages are published externally, **every link is absolute** — never a repo-relative path. A link to another skill points at `<docs-domain>/skills-<name>`; a link into the repo points at its full `https://github.com/djpken/skills/...` URL. A relative link that works in the repo breaks once published.
+Because these pages are published externally, **every link is absolute** — never a repo-relative path. A link to another skill points at `<docs-domain>/skills-<name>`; a link into the repo points at its full `https://github.com/djpken/agent-dev-environment/...` URL. A relative link that works in the repo breaks once published.
 
 There is no H1 — the published page takes its title from the slug.
 
@@ -19,14 +19,14 @@ Fill the template below. The **fixed frame** (Quickstart block, source link, `##
 Quickstart:
 
 ```bash
-npx skills add djpken/skills --skill=<name>
+npx skills add djpken/agent-dev-environment --skill=<name>
 ```
 
 ```bash
 npx skills update <name>
 ```
 
-[Source](https://github.com/djpken/skills/tree/main/skills/<bucket>/<name>)
+[Source](https://github.com/djpken/agent-dev-environment/tree/main/skills/<bucket>/<name>)
 
 ## What it does
 

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "capabilities", "lifecycle", "transport", "command", "health", "permissions"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "capabilities": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "lifecycle": {"enum": ["host-spawned", "shared-local"]},
+    "transport": {"enum": ["cli", "stdio", "http"]},
+    "command": {"$ref": "#/$defs/argv"},
+    "health": {"$ref": "#/$defs/argv"},
+    "url": {"type": "string", "pattern": "^http://127\\.0\\.0\\.1:[0-9]+/"},
+    "permissions": {"type": "array", "uniqueItems": true, "items": {"enum": ["workspace-read", "workspace-write", "local-state", "llm-network", "listen-loopback"]}},
+    "env_vars": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"}}
+  },
+  "$defs": {"argv": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}},
+  "allOf": [
+    {"if": {"properties": {"lifecycle": {"const": "shared-local"}}}, "then": {"required": ["url"], "properties": {"transport": {"const": "http"}}}},
+    {"if": {"properties": {"transport": {"const": "http"}}}, "then": {"required": ["url"], "properties": {"lifecycle": {"const": "shared-local"}}}}
+  ]
+}

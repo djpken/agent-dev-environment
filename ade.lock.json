@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "workflow": {
+    "repository": "https://github.com/djpken/agent-dev-environment.git",
+    "source": "bundled"
+  },
+  "artifacts": {
+    "ocr": {
+      "version": "1.11.4",
+      "base_url": "https://github.com/alibaba/open-code-review/releases/download/v1.11.4/",
+      "platforms": {
+        "linux-x86_64": {"file": "opencodereview-linux-amd64", "sha256": "7133465774aff6330fd8d25eecc57a28e5852bc55d1ae55fd00443ebc4c6b023"},
+        "linux-aarch64": {"file": "opencodereview-linux-arm64", "sha256": "981964ac4466f1ed20129ae46b63a31a929219c1228a7a94c345cb4c9b8155d3"},
+        "darwin-x86_64": {"file": "opencodereview-darwin-amd64", "sha256": "09a57a9022071c19f82cec4d793bb8d93d3b308e0207bdd6b9ad823cbb1e5d17"},
+        "darwin-arm64": {"file": "opencodereview-darwin-arm64", "sha256": "36a29bb525f59ad88f39f6fb4a8bd76a67df5ed95399c92f3d10143274c91b15"}
+      }
+    }
+  },
+  "providers": [
+    {
+      "id": "ocr", "version": "1.11.4", "capabilities": ["review"],
+      "lifecycle": "host-spawned", "transport": "cli",
+      "command": ["{release}/bin/ocr"], "health": ["{release}/bin/ocr", "--version"],
+      "permissions": ["workspace-read", "local-state", "llm-network"]
+    },
+    {
+      "id": "headroom", "version": "0.36.5", "capabilities": ["context-compression"],
+      "lifecycle": "host-spawned", "transport": "stdio",
+      "command": ["headroom", "mcp", "serve"], "health": ["headroom", "--version"],
+      "permissions": ["local-state"]
+    }
+  ],
+  "defaults": {"providers": {"ocr": true, "headroom": false}, "prompts": []}
+}

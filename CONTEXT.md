@@ -1,6 +1,40 @@
-# Review workflow context
+# Agent development environment context
 
-這個 repo 收納可獨立安裝的 skills 與 prompt。Review workflow 以 `/base` 固定工作起點，再由不同 review variant 檢查變更。
+這個 monorepo 收納 Agent Development Environment 的 runtime、skills 與 prompt，並定義環境與 review workflow 語言。
+
+## Environment
+
+**Agent Development Environment (ADE)**：
+個人開發者可直接安裝的完整 agent 工作環境，讓支援的 agent hosts 使用一致的 workflows 與 capabilities。
+_Avoid_: plugin collection、skills repo
+
+**Core contract**：
+所有支援的 agent hosts 共同遵守、且不綁定單一 host 的行為契約。
+_Avoid_: common config、shared prompt
+
+**Host adapter**：
+將特定 agent host 的 invocation、設定與生命週期對應到 Core contract 的邊界元件。
+_Avoid_: plugin、integration script
+
+**Composition repository**：
+同時收納 ADE runtime 與 Workflow Pack，定義完整 distribution、元件版本與整合關係的 canonical source。
+_Avoid_: plugin repo、dotfiles repo
+
+**Workflow Pack**：
+由 ADE 安裝的 skills、prompts 與 workflow policies 集合；可獨立安裝，與 runtime 共存於同一個 monorepo。
+_Avoid_: plugin、ADE distribution
+
+**Capability provider**：
+獨立擁有一項專門能力及其執行狀態，並透過受控介面供 ADE 使用的元件。
+_Avoid_: tool、plugin、MCP server
+
+**Provider manifest**：
+ADE 用來判斷 Capability provider 身分、能力、權限需求與健康狀態的宣告。
+_Avoid_: MCP config、plugin metadata
+
+**Review engine**：
+負責程式碼分析、coverage 與 structured findings 的 Capability provider。
+_Avoid_: code-review skill、review workflow
 
 ## Prompts
 

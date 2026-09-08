@@ -1,11 +1,11 @@
 {
-  "name": "skills",
+  "name": "agent-dev-environment",
   "version": "0.1.0",
   "private": true,
-  "description": "djpken's agent skills for real engineering",
+  "description": "Local-first agent development environment with skills and provider management",
   "repository": {
     "type": "git",
-    "url": "https://github.com/djpken/skills"
+    "url": "https://github.com/djpken/agent-dev-environment"
   },
   "license": "MIT",
   "scripts": {
