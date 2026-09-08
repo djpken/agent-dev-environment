@@ -5,3 +5,9 @@ skills/.DS_Store
 **/.env
 **/.env.*
 !**/.env.example
+.venv/
+.ruff_cache/
+__pycache__/
+*.egg-info/
+.ade/
+user.json

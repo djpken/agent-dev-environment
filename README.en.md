@@ -1,8 +1,36 @@
-# Skills
+# agent-dev-environment
 
 [繁體中文](./README.md) · English
 
-A collection of agent skills (slash commands and behaviors) for Claude Code and other Agent-Skills-standard harnesses.
+A local-first agent development environment for individual developers. This monorepo combines the Workflow Pack with provider management, atomic installation generations, rollback, and Claude Code/Codex/OpenCode workspace adapters.
+
+## ADE runtime
+
+Install only the existing `skills` plugin, or use the full ADE CLI from this repository:
+
+```bash
+uv sync --frozen
+uv run --frozen ade plan --user user.example.json
+uv run --frozen ade apply --user user.example.json --plan-id <plan_id>
+uv run --frozen ade doctor
+uv run --frozen python -m unittest discover -s tests -v
+```
+
+The plan ID covers the bundled workflow contents. Skills and prompts are captured from this repository, while external provider versions remain locked. Model review stays blocked until an explicit endpoint and credentials are configured. Existing skill names and the plugin identity remain unchanged.
+
+See the [runtime guide](./docs/ade-runtime.md), [Plane-to-Linear sync](./docs/ade-plane-linear-sync.md), and [responsibility boundaries](./docs/ade-responsibilities.md). Python runtime code lives in `ade/`; workflows remain in `skills/` and `prompt/`. npm is used only for changesets.
+
+## Module boundaries
+
+| Location | Responsibility |
+| --- | --- |
+| `skills/`, `prompt/` | Workflow policies and prompts |
+| `ade/core.py` | Bundling, composition, plan/apply, and rollback |
+| `ade/hosts.py` | Host configuration and workspace attachment |
+| `ade/cli.py` | CLI, review adapter, sync entry point, and process lifecycle |
+| `ade/sync.py`, `ade/scheduler.py` | Plane-to-Linear reconciliation, local state, and user-level schedules |
+| `ade.lock.json`, `ade/provider.schema.json` | Provider versions, capabilities, permissions, and health contracts |
+| `tests/` | Runtime, host, sync, and scheduler verification |
 
 ## Structure
 

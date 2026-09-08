@@ -1,8 +1,41 @@
-# plugins-zh-tw
+# agent-dev-environment
 
-[回到 README.md](./README.md) · [English](./README.en.md)
+繁體中文 · [English](./README.en.md) · [README.zh-TW.md](./README.zh-TW.md)
 
-一套供 Claude Code 與其他相容 Agent-Skills 標準 harness 使用的 agent skills、plugins、slash commands 與行為集合。
+個人開發者的 local-first Agent Development Environment。此 monorepo 同時維護 skills、個人 prompts、provider 管理與 Claude Code／Codex／OpenCode 的 host adapters。
+
+## 兩個使用入口
+
+只使用 skills：安裝現有 `.claude-plugin/plugin.json` 宣告的 Workflow Pack，plugin 名稱維持 `skills`，既有 slash commands 不變。
+
+使用完整 ADE：在本 repo 執行以下指令，將 `plan` 輸出的 ID 帶入 `apply`。
+
+```bash
+uv sync --frozen
+uv run --frozen ade plan --user user.example.json
+uv run --frozen ade apply --user user.example.json --plan-id <plan_id>
+uv run --frozen ade doctor
+```
+
+使用與限制見 [ADE runtime](./docs/ade-runtime.md)、[Plane 到 Linear 同步](./docs/ade-plane-linear-sync.md)，職責分工見 [責任表](./docs/ade-responsibilities.md)。`user.example.json` 未設定 LLM endpoint，因此模型 review 會保持 blocked；credentials 不寫入 repository。
+
+## 模組邊界
+
+| 位置 | 責任 |
+| --- | --- |
+| `skills/`、`prompt/` | 工作方法、MCP 使用政策、結果處理 |
+| `ade/core.py` | Bundle、設定合併、plan/apply、rollback |
+| `ade/hosts.py` | Host 設定轉換與 workspace attach |
+| `ade/cli.py` | CLI、review adapter、sync 入口與 process lifecycle |
+| `ade/sync.py`、`ade/scheduler.py` | Plane 到 Linear reconciliation、local state 與 user-level schedule |
+| `ade.lock.json`、`ade/provider.schema.json` | Provider 版本、能力、權限與健康檢查契約 |
+| `tests/` | Runtime 與 host 整合驗證 |
+
+`npm` 管理 changesets；Python runtime 使用 `uv.lock`。測試指令：
+
+```bash
+uv run --frozen python -m unittest discover -s tests -v
+```
 
 ## 目錄結構
 
@@ -23,7 +56,7 @@ Skills 放在 `skills/<bucket>/<skill-name>/SKILL.md` 下。Bucket 分類：
 scripts/link-skills.sh
 ```
 
-把 `skills/` 底下每個 skill symlink 到 `~/.Codex/skills` 與 `~/.agents/skills`，供本機測試。新增、移除或重新命名 skill 後要重新執行。
+把 `skills/` 底下每個 skill symlink 到 `~/.claude/skills` 與 `~/.agents/skills`，供本機測試。新增、移除或重新命名 skill 後要重新執行。
 
 ## User-invoked skills
 

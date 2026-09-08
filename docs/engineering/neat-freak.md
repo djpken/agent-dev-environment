@@ -1,14 +1,14 @@
 Quickstart:
 
 ```bash
-npx skills add djpken/skills --skill=neat-freak
+npx skills add djpken/agent-dev-environment --skill=neat-freak
 ```
 
 ```bash
 npx skills update neat-freak
 ```
 
-[Source](https://github.com/djpken/skills/tree/main/skills/engineering/neat-freak)
+[Source](https://github.com/djpken/agent-dev-environment/tree/main/skills/engineering/neat-freak)
 
 ## What it does
 

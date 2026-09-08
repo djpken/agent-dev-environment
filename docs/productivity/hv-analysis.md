@@ -1,14 +1,14 @@
 Quickstart:
 
 ```bash
-npx skills add djpken/skills --skill=hv-analysis
+npx skills add djpken/agent-dev-environment --skill=hv-analysis
 ```
 
 ```bash
 npx skills update hv-analysis
 ```
 
-[Source](https://github.com/djpken/skills/tree/main/skills/productivity/hv-analysis)
+[Source](https://github.com/djpken/agent-dev-environment/tree/main/skills/productivity/hv-analysis)
 
 ## What it does
 
@@ -28,4 +28,4 @@ The bundled `scripts/md_to_pdf.py` PDF renderer needs WeasyPrint: `pip install w
 
 ## Where it fits
 
-A reach-for-it-anytime standalone research skill. Its writing register borrows technique (rhythm, callback, "not officious") from the [khazix-writer](https://github.com/djpken/skills/tree/main/skills/personal/khazix-writer) skill's style guide but stays more structured than a WeChat article — headings and looser colloquialism are both allowed here, unlike in khazix-writer's output.
+A reach-for-it-anytime standalone research skill. Its writing register borrows technique (rhythm, callback, "not officious") from the [khazix-writer](https://github.com/djpken/agent-dev-environment/tree/main/skills/personal/khazix-writer) skill's style guide but stays more structured than a WeChat article — headings and looser colloquialism are both allowed here, unlike in khazix-writer's output.

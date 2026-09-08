@@ -1,14 +1,14 @@
 Quickstart:
 
 ```bash
-npx skills add djpken/skills --skill=storage-analyzer
+npx skills add djpken/agent-dev-environment --skill=storage-analyzer
 ```
 
 ```bash
 npx skills update storage-analyzer
 ```
 
-[Source](https://github.com/djpken/skills/tree/main/skills/productivity/storage-analyzer)
+[Source](https://github.com/djpken/agent-dev-environment/tree/main/skills/productivity/storage-analyzer)
 
 ## What it does
 
