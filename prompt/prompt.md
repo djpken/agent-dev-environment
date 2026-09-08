@@ -282,6 +282,7 @@ which rtk             # 確認是正確的執行檔
 ```
 
 ⚠️ **名稱衝突**：如果 `rtk gain` 失敗，可能裝到 reachingforthejack/rtk（Rust Type Kit）而不是這個。
+
 ---
 
 # 程式碼搜尋與導覽：結構化查詢 vs 語意查詢 vs 精確比對

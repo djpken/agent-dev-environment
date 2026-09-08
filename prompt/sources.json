@@ -1,0 +1,110 @@
+{
+  "outputs": [
+    "prompt/prompt.md",
+    "prompt/prompt.zh-TW.md"
+  ],
+  "sources": [
+    {
+      "id": "adhd",
+      "local": "prompt/prompt_i-hava-adhd.zh-tw.md",
+      "import_commit": null,
+      "upstream": {
+        "repo": "panda850819/i-have-adhd-zh-tw",
+        "branch": "main",
+        "baseline": {
+          "commit": "182a945d1c9853b3f2d064275c5d3dceba4eceee",
+          "observed_on": "2026-09-05",
+          "kind": "tracking-start-not-import-version",
+          "files": [
+            {
+              "path": "skills/i-have-adhd-zh-tw/SKILL.md",
+              "snapshot": "docs/prompt-upstream/adhd/SKILL.md",
+              "sha256": "6ff11f9f12ecb0183059ae4f49b9e9841956fc52ec5d3f7d24a319f6039e0f89"
+            },
+            {
+              "path": "LICENSE",
+              "snapshot": "docs/prompt-upstream/adhd/LICENSE",
+              "sha256": "8acbb618089b738404f76ac60fca1aaa995d9a87995eddf95f0b777acd7f7d2c"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "caveman",
+      "local": "prompt/prompt_caveman.zh-tw.md",
+      "import_commit": null,
+      "upstream": {
+        "repo": "djpken/caveman",
+        "branch": "main",
+        "baseline": {
+          "commit": "204b2c8471ff978ffe5a873751433e8787178876",
+          "observed_on": "2026-09-05",
+          "kind": "tracking-start-not-import-version",
+          "files": [
+            {
+              "path": "skills/caveman/SKILL.md",
+              "snapshot": "docs/prompt-upstream/caveman/SKILL.md",
+              "sha256": "5e30bb56afbd0b01bd736f2da84180e76f18db4a64de8e124525d5c8dc2e8605"
+            },
+            {
+              "path": "skills/caveman/SKILL.zh-TW.md",
+              "snapshot": "docs/prompt-upstream/caveman/SKILL.zh-TW.md",
+              "sha256": "21a2a855d7f13440fd686410a4e5df5412a7c146b7174d548b0d3d940525344b"
+            },
+            {
+              "path": "LICENSE",
+              "snapshot": "docs/prompt-upstream/caveman/LICENSE",
+              "sha256": "5eb826cd03151bcc7cce3f80d40e87733237fedfc6c36d6908aca5fd650a0bdb"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ponytail",
+      "local": "prompt/prompt_ponytail.zh-tw.md",
+      "import_commit": null,
+      "upstream": {
+        "repo": "djpken/ponytail",
+        "branch": "main",
+        "baseline": {
+          "commit": "d62392db4c138593b14bfc631fc320c3bbc8c194",
+          "observed_on": "2026-09-05",
+          "kind": "tracking-start-not-import-version",
+          "files": [
+            {
+              "path": "skills/ponytail/SKILL.md",
+              "snapshot": "docs/prompt-upstream/ponytail/SKILL.md",
+              "sha256": "6213d29ce2e2c75199c61db6281b3f69e91807657b914c283f75162e6c9a1d2b"
+            },
+            {
+              "path": "skills/ponytail/SKILL.zh-TW.md",
+              "snapshot": "docs/prompt-upstream/ponytail/SKILL.zh-TW.md",
+              "sha256": "a5353c089fc5dbf438c4da6d35d910db02ebfdb65bc6db7febdc58bb71d86a2c"
+            },
+            {
+              "path": "LICENSE",
+              "snapshot": "docs/prompt-upstream/ponytail/LICENSE",
+              "sha256": "fb1bc6909ac3ef82d5c22106e32ef682b0cff66788fa915fb9b53b15c9d2f3ab"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "rtk",
+      "local": "prompt/prompt_rtk.zh-tw.md",
+      "origin": "~/.claude/RTK.md",
+      "import_commit": null,
+      "upstream": null
+    },
+    {
+      "id": "codebase-memory-mcp",
+      "local": "prompt/prompt_codebase-memory-mcp.zh-tw.md",
+      "origin": "~/.claude/CLAUDE.md",
+      "import_commit": null,
+      "upstream": null
+    }
+  ]
+}
