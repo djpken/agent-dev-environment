@@ -6,7 +6,7 @@
 
 ### Issue tracker
 
-Issues 與 specs 使用 GitHub Issues，操作使用 `gh` CLI。詳見 `docs/agents/issue-tracker.md`。
+Issues 與 specs 使用 Linear，透過 `orca linear ...` CLI 操作。詳見 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 
