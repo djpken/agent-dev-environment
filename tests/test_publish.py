@@ -175,6 +175,9 @@ class PublishTests(unittest.TestCase):
             with self.assertRaisesRegex(core.Error, "invalid HTML entrypoint"):
                 publish.publish(bundle, "architecture", base / "public",
                                 "http://172.16.240.41:80", "../index.html")
+            with self.assertRaisesRegex(core.Error, "invalid HTML entrypoint"):
+                publish.publish(bundle, "architecture", base / "public",
+                                "http://172.16.240.41:80", ".well-known/index.html")
 
             linked_bundle = base / "linked-bundle"
             linked_bundle.mkdir()

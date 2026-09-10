@@ -26,7 +26,7 @@ def _validate_entrypoint(entrypoint):
                not entrypoint.startswith("/") and "\\" not in entrypoint,
                "invalid HTML entrypoint")
     parts = entrypoint.split("/")
-    core.check(all(part not in ("", ".", "..") for part in parts),
+    core.check(all(part not in ("", ".", "..") and not part.startswith(".") for part in parts),
                "invalid HTML entrypoint")
     core.check(PurePosixPath(entrypoint).suffix.lower() in HTML_SUFFIXES,
                "HTML entrypoint must end with .html or .htm")
