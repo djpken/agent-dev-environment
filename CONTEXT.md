@@ -36,6 +36,24 @@ _Avoid_: MCP config、plugin metadata
 負責程式碼分析、coverage 與 structured findings 的 Capability provider。
 _Avoid_: code-review skill、review workflow
 
+## Remote HTML publication
+
+**Web artifact**：
+由 agent 產生、供使用者在一般 browser 讀取的 HTML 產物，可以是單一 HTML 檔案，也可以是包含相依資源的 bundle。
+_Avoid_: provider artifact、guest path
+
+**Artifact publication**：
+在 `orca serve` ADE execution profile 中，讓 Web artifact 可由使用者 browser 存取的交付行為。
+_Avoid_: local file output、preview session
+
+**Artifact access URL**：
+使用者 browser 開啟 Web artifact 的 HTTP URL。取得 URL 的人都能讀取對應內容。
+_Avoid_: guest path、provider URL
+
+**Guest path**：
+只在 remote runtime 所在 VM 有效的檔案路徑，不能當成使用者的 Artifact access URL。
+_Avoid_: artifact access URL、browser URL
+
 ## ADE issue synchronization
 
 **Plane issue**：公司 Plane 中的原始工作項目，也是同步資料的來源。

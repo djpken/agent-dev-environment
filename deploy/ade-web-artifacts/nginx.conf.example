@@ -1,0 +1,29 @@
+# Install as an nginx server configuration after replacing the server_name.
+server {
+    listen 80 default_server;
+    server_name artifact.internal.example 172.16.240.41;
+    root /var/lib/ade/web-artifacts;
+
+    location = /healthz {
+        default_type text/plain;
+        add_header Cache-Control "no-store" always;
+        return 200 "ok\n";
+    }
+
+    location ~ ^/artifacts/(?:[^/]+/)*\. {
+        return 404;
+    }
+
+    location /artifacts/ {
+        limit_except GET HEAD {
+            deny all;
+        }
+        add_header Cache-Control "no-store" always;
+        autoindex off;
+        try_files $uri $uri/ =404;
+    }
+
+    location / {
+        return 404;
+    }
+}

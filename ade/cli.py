@@ -9,11 +9,16 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import core, hosts, scheduler, sync
+from . import core, hosts, publish as html_publish, scheduler, sync
+
+
+DEFAULT_WEB_ARTIFACT_BASE_URL = "http://172.16.240.41:80"
+DEFAULT_WEB_ARTIFACT_ROOT = Path("/var/lib/ade/web-artifacts")
 
 
 def output(value):
@@ -129,6 +134,40 @@ def install_schedule(root, provider_name, env_file=None, enable=False):
     return scheduler.install(root, platform.system().lower(), provider_name, times, env_file, sys.executable, enable=enable)
 
 
+def publisher_ready(base_url=DEFAULT_WEB_ARTIFACT_BASE_URL):
+    parsed = html_publish.validate_base_url(base_url)
+    host = parsed.hostname
+    if ":" in host:
+        host = "[" + host + "]"
+    request = urllib.request.Request(
+        "http://127.0.0.1:80/healthz",
+        headers={"Host": host},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=2):
+            return
+    except (OSError, urllib.error.URLError) as exc:
+        raise core.Error("publish blocked: HTTP publisher unavailable at 127.0.0.1:80") from exc
+
+
+def publish_html(args):
+    artifact_root = args.artifact_root or Path(
+        os.environ.get("ADE_WEB_ARTIFACT_ROOT", DEFAULT_WEB_ARTIFACT_ROOT))
+    if args.publish_operation == "delete":
+        return html_publish.delete(args.name, artifact_root)
+    base_url = args.base_url or os.environ.get("ADE_WEB_ARTIFACT_BASE_URL") or DEFAULT_WEB_ARTIFACT_BASE_URL
+    try:
+        html_publish.validate_base_url(base_url)
+        publisher_ready(base_url)
+        return html_publish.publish(args.source, args.name, artifact_root, base_url, args.entrypoint)
+    except core.Error as exc:
+        if str(exc).startswith("publish blocked:"):
+            raise
+        raise core.Error("publish blocked: " + str(exc)) from exc
+    except OSError as exc:
+        raise core.Error("publish blocked: " + str(exc)) from exc
+
+
 def main():
     parser = argparse.ArgumentParser(description="ADE composition manager")
     parser.add_argument("--root", type=Path, default=Path.home() / ".local/share/ade")
@@ -152,6 +191,17 @@ def main():
     p = sub.add_parser("provider")
     p.add_argument("name")
     p.add_argument("--shared", action="store_true")
+    p = sub.add_parser("publish-html")
+    publish_sub = p.add_subparsers(dest="publish_operation", required=True)
+    publish_parser = publish_sub.add_parser("publish")
+    publish_parser.add_argument("source", type=Path)
+    publish_parser.add_argument("--name", required=True)
+    publish_parser.add_argument("--entrypoint")
+    publish_parser.add_argument("--artifact-root", type=Path)
+    publish_parser.add_argument("--base-url")
+    delete_parser = publish_sub.add_parser("delete")
+    delete_parser.add_argument("name")
+    delete_parser.add_argument("--artifact-root", type=Path)
     p = sub.add_parser("review")
     p.add_argument("--workspace", type=Path, default=Path.cwd())
     p.add_argument("--base", required=True)
@@ -183,6 +233,8 @@ def main():
             output(core.rollback(args.root))
         elif args.operation == "status":
             output({"generation": str(core.generation(args.root))})
+        elif args.operation == "publish-html":
+            output(publish_html(args))
         elif args.operation == "attach":
             output(hosts.attach(args.root, args.workspace, args.host, args.apply))
         elif args.operation == "doctor":

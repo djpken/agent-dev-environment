@@ -62,6 +62,27 @@ uv run --frozen ade attach --host codex --workspace /path/to/project --apply
 
 預設接入 promoted skills 與 `base`、`implement`、`code-review`、`wait-what`；尚未遷移的 `code-review-ocr` 不會接入。測試覆蓋三種設定格式及接入，未向三種 host 發送模型請求。個人 prompt 產物保留為明確選用檔案，不自動寫入專案 `AGENTS.md`。
 
+## Web artifact 發布
+
+`orca serve` profile 中，agent 產生的 HTML 可用 `ade publish-html` 發布給使用者的 browser。Publisher 由 systemd 管理的 nginx 提供 HTTP port `80`，固定使用 `/artifacts/<name>/` path routing。拿到 URL 的人都能讀取內容；固定名稱由最後一次發布覆蓋，刪除只透過 CLI 執行。
+
+Publisher root 與 browser origin 可用環境變數設定：
+
+```bash
+export ADE_WEB_ARTIFACT_ROOT=/var/lib/ade/web-artifacts
+export ADE_WEB_ARTIFACT_BASE_URL=http://172.16.240.41:80
+```
+
+發布單檔 HTML 或 bundle：
+
+```bash
+uv run --frozen ade publish-html publish report.html --name architecture
+uv run --frozen ade publish-html publish report-bundle/ --name architecture --entrypoint index.html
+uv run --frozen ade publish-html delete architecture
+```
+
+單檔 HTML 會以 `index.html` 作為 entrypoint；bundle 可包含 HTML、PNG、CSS 與 JS。CLI 會先檢查 `http://127.0.0.1:80/healthz`，服務不可用時回報 `publish blocked`，不把 guest path 當成 browser URL。nginx 設定樣板位於 [`deploy/ade-web-artifacts/`](../deploy/ade-web-artifacts/)。
+
 ## Review
 
 先在 user config 設定明確 `llm_endpoint` 與 OCR grants，再重新 plan/apply。只有執行 review 時才從指定環境變數讀取 credential；credential 不寫入 lockfile、generation 或 CLI arguments。
