@@ -16,6 +16,14 @@ _Avoid_: common config、shared prompt
 將特定 agent host 的 invocation、設定與生命週期對應到 Core contract 的邊界元件。
 _Avoid_: plugin、integration script
 
+**Orca repository**：
+提供 ADE 執行 host 與 remote runtime 的 `stablyai/orca` repository。ADE runtime、Workflow Pack 與 provider composition 仍由本 repo 擁有。
+_Avoid_: ADE runtime repository、Workflow Pack repository
+
+**ADE execution profile**：
+決定 ADE 工作負載使用哪個 Orca execution host 的命名設定。目前支援 `orca serve` 與 `Local`：前者使用 headless Orca runtime，後者使用目前主機。
+_Avoid_: provider lifecycle、provider profile
+
 **Composition repository**：
 同時收納 ADE runtime 與 Workflow Pack，定義完整 distribution、元件版本與整合關係的 canonical source。
 _Avoid_: plugin repo、dotfiles repo

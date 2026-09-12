@@ -4,6 +4,19 @@
 
 目前為 `0.1.0`，支援 Linux/macOS、Python 3.11 以上與 Git。使用 `uv.lock` 固定 ADE 的 Python 相依。Windows 尚未實作原子 symlink 切換與 process lifecycle。
 
+## Orca 整合與 execution profiles
+
+ADE 執行環境使用 [`stablyai/orca`](https://github.com/stablyai/orca) repository 提供的 Orca execution host。本 repo 的 `ade/` 仍擁有 ADE runtime，`skills/` 與 `prompt/` 仍擁有 Workflow Pack；Orca 負責承載與連接工作負載。
+
+目前有兩個 ADE execution profile：
+
+| Profile | 執行位置 | 使用方式 |
+| --- | --- | --- |
+| `orca serve` | headless Orca runtime | 由 `orca serve` 啟動不開桌面視窗的 Orca server，透過 pairing 讓 ADE client 連線。適合 VM、遠端 Linux 或長時間執行的環境。 |
+| `Local` | 目前執行 Orca 的主機 | 直接在本機執行工作負載，不需要另外連接 `orca serve`。適合本機開發與測試。 |
+
+Profile 只選擇工作負載的 execution host；兩個 profile 共用同一套 ADE Workflow Pack、provider manifest 與授權規則。`orca serve`／`Local` 也不要和 provider manifest 的 `host-spawned`／`shared-local` 混用，前者描述執行位置，後者描述 provider process 的生命週期 owner。
+
 ## 使用
 
 在本 repo 執行：

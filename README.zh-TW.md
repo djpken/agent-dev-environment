@@ -17,7 +17,7 @@ uv run --frozen ade apply --user user.example.json --plan-id <plan_id>
 uv run --frozen ade doctor
 ```
 
-使用與限制見 [ADE runtime](./docs/ade-runtime.md)、[Plane 到 Linear 同步](./docs/ade-plane-linear-sync.md)，職責分工見 [責任表](./docs/ade-responsibilities.md)。`user.example.json` 未設定 LLM endpoint，因此模型 review 會保持 blocked；credentials 不寫入 repository。
+使用與限制見 [ADE runtime](./docs/ade-runtime.md)，其中包含 `orca serve` 與 `Local` execution profiles 的說明；Plane 到 Linear 同步見 [同步文件](./docs/ade-plane-linear-sync.md)，職責分工見 [責任表](./docs/ade-responsibilities.md)。`user.example.json` 未設定 LLM endpoint，因此模型 review 會保持 blocked；credentials 不寫入 repository。
 
 ## 模組邊界
 

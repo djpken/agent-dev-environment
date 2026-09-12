@@ -1,0 +1,248 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ADE × Orca 執行結構",
+    "output": "ade-orca-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/djpken/agent-dev-environment.git",
+      "revision": "7c2b8a861aee281afddb0d18283b1a7476e98b0a"
+    },
+    "views": [
+      {
+        "id": "ownership",
+        "label": "Ownership 邊界",
+        "focus": ["ade-runtime", "workflow-pack", "provider-contracts", "host-adapters", "orca-runtime"],
+        "note": "查看 ADE 環境中各項元件由哪個 repository 擁有。"
+      },
+      {
+        "id": "profile-choice",
+        "label": "Profile 選擇",
+        "focus": ["orca-runtime", "serve-profile", "local-profile", "workspace"],
+        "note": "沿著兩個 execution profile 查看工作負載最後在哪裡執行。"
+      },
+      {
+        "id": "configuration-path",
+        "label": "設定路徑",
+        "focus": ["workflow-pack", "provider-contracts", "ade-runtime", "host-adapters", "orca-runtime"],
+        "note": "追蹤 Workflow Pack 與 provider 契約如何進入 Orca host 設定。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "ade-runtime",
+      "type": "backend",
+      "label": "ADE runtime",
+      "sublabel": "ade/ · 安裝 / plan / apply / attach",
+      "tag": "composition owner",
+      "pos": [90, 190],
+      "size": [250, 78],
+      "sources": [
+        { "path": "ade/core.py", "line": 142, "label": "bundle" },
+        { "path": "docs/ade-runtime.md", "line": 3, "label": "runtime 說明" }
+      ]
+    },
+    {
+      "id": "workflow-pack",
+      "type": "backend",
+      "label": "Workflow Pack",
+      "sublabel": "skills/ + prompt/",
+      "tag": "工作流程 + policies",
+      "pos": [90, 385],
+      "size": [250, 78],
+      "sources": [
+        { "path": "CONTEXT.md", "line": 23, "label": "定義" },
+        { "path": "docs/adr/0008-ade-monorepo.md", "line": 9, "label": "ownership" }
+      ]
+    },
+    {
+      "id": "provider-contracts",
+      "type": "backend",
+      "label": "Provider 契約",
+      "sublabel": "lockfile · grants · health checks",
+      "tag": "宣告能力",
+      "pos": [90, 580],
+      "size": [250, 78],
+      "sources": [
+        { "path": "ade.lock.json", "line": 1, "label": "版本" },
+        { "path": "ade/provider.schema.json", "line": 1, "label": "manifest schema" }
+      ]
+    },
+    {
+      "id": "host-adapters",
+      "type": "backend",
+      "label": "Host adapters",
+      "sublabel": "Claude Code · Codex · OpenCode",
+      "tag": "原生 host exports",
+      "pos": [405, 385],
+      "size": [270, 78],
+      "sources": [
+        { "path": "ade/hosts.py", "line": 13, "label": "host formats" },
+        { "path": "docs/ade-runtime.md", "line": 43, "label": "exports" }
+      ]
+    },
+    {
+      "id": "orca-runtime",
+      "type": "external",
+      "label": "Orca execution host",
+      "sublabel": "stablyai/orca repository",
+      "tag": "執行工作負載",
+      "pos": [770, 190],
+      "size": [270, 78],
+      "sources": [
+        { "path": "docs/ade-runtime.md", "line": 9, "label": "ADE 整合" },
+        { "path": "CONTEXT.md", "line": 19, "label": "Orca repository" }
+      ]
+    },
+    {
+      "id": "serve-profile",
+      "type": "cloud",
+      "label": "orca serve",
+      "sublabel": "headless runtime server",
+      "tag": "pairing / WebSocket",
+      "pos": [710, 430],
+      "size": [250, 78],
+      "sources": [
+        { "path": "docs/ade-runtime.md", "line": 15, "label": "serve profile" },
+        { "path": "docs/ade-runtime.md", "line": 9, "label": "headless 整合" }
+      ]
+    },
+    {
+      "id": "local-profile",
+      "type": "backend",
+      "label": "Local",
+      "sublabel": "目前的 Orca 主機",
+      "tag": "直接執行",
+      "pos": [1000, 430],
+      "size": [250, 78],
+      "sources": [
+        { "path": "docs/ade-runtime.md", "line": 16, "label": "Local profile" },
+        { "path": "docs/ade-runtime.md", "line": 18, "label": "profile 邊界" }
+      ]
+    },
+    {
+      "id": "workspace",
+      "type": "external",
+      "label": "Project workspace",
+      "sublabel": "agent task 的執行目標",
+      "tag": "共同結果",
+      "pos": [855, 625],
+      "size": [250, 78],
+      "sources": [
+        { "path": "docs/ade-runtime.md", "line": 53, "label": "workspace attach" },
+        { "path": "docs/ade-responsibilities.md", "line": 36, "label": "lifecycle 邊界" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "agent-dev-environment · ADE composition repository",
+      "wraps": ["ade-runtime", "workflow-pack", "provider-contracts", "host-adapters"],
+      "pad": 42
+    },
+    {
+      "kind": "region",
+      "label": "stablyai/orca · execution repository",
+      "wraps": ["orca-runtime", "serve-profile", "local-profile"],
+      "pad": 42
+    }
+  ],
+  "connections": [
+    {
+      "id": "workflow-to-runtime",
+      "from": "workflow-pack",
+      "to": "ade-runtime",
+      "label": "打包進 ADE",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "contracts-to-runtime",
+      "from": "provider-contracts",
+      "to": "ade-runtime",
+      "label": "版本 + grants",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "right",
+      "via": [[380, 619], [380, 229]],
+      "labelAt": [380, 477]
+    },
+    {
+      "id": "runtime-to-adapters",
+      "from": "ade-runtime",
+      "to": "host-adapters",
+      "label": "輸出 host 設定",
+      "variant": "emphasis",
+      "labelDx": 72
+    },
+    {
+      "id": "adapters-to-orca",
+      "from": "host-adapters",
+      "to": "orca-runtime",
+      "label": "選定 execution host",
+      "variant": "emphasis"
+    },
+    {
+      "id": "orca-to-serve",
+      "from": "orca-runtime",
+      "to": "serve-profile",
+      "label": "profile",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "orca-to-local",
+      "from": "orca-runtime",
+      "to": "local-profile",
+      "label": "profile",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "serve-to-workspace",
+      "from": "serve-profile",
+      "to": "workspace",
+      "label": "執行工作負載",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "local-to-workspace",
+      "from": "local-profile",
+      "to": "workspace",
+      "label": "執行工作負載",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Ownership 邊界",
+      "items": [
+        "agent-dev-environment 擁有 ADE runtime、Workflow Pack 與 provider 契約",
+        "stablyai/orca 提供 execution host"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "兩個 execution profile",
+      "items": [
+        "orca serve 啟動 headless runtime，透過 pairing 連線",
+        "Local 直接在目前的 Orca 主機執行"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "分開看兩個維度",
+      "items": [
+        "Profile 選擇 execution host",
+        "host-spawned 與 shared-local 描述 provider process 的 owner"
+      ]
+    }
+  ]
+}
