@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily agent environment update at 04:00 UTC+8
+
+[Timer]
+OnCalendar=*-*-* 20:00:00 UTC
+RandomizedDelaySec=0
+Persistent=true
+Unit=agent-environment-update.service
+
+[Install]
+WantedBy=timers.target

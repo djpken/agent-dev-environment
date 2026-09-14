@@ -28,7 +28,9 @@ See the [runtime guide](./docs/ade-runtime.md), [Plane-to-Linear sync](./docs/ad
 | `ade/core.py` | Bundling, composition, plan/apply, and rollback |
 | `ade/hosts.py` | Host configuration and workspace attachment |
 | `ade/cli.py` | CLI, review adapter, sync entry point, and process lifecycle |
+| `ade/environment.py` | Per-VM agent environment health, wallet-signed controls, update runs, and snapshot integration |
 | `ade/sync.py`, `ade/scheduler.py` | Plane-to-Linear reconciliation, local state, and user-level schedules |
+| `deploy/agent-environment/` | Linux + systemd VM recipe, manager service, and root-owned updater |
 | `ade.lock.json`, `ade/provider.schema.json` | Provider versions, capabilities, permissions, and health contracts |
 | `tests/` | Runtime, host, sync, and scheduler verification |
 

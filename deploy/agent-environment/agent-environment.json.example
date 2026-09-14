@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "vm_id": "__VM_ID__",
+  "source_root": "__SOURCE_ROOT__",
+  "state_root": "/var/lib/ade/agent-environment",
+  "listen": {
+    "host": "0.0.0.0",
+    "port": 6790
+  },
+  "public_origin": "https://__PUBLIC_HOST__:6790",
+  "tls": {
+    "cert": "/etc/ade/tls/agent-environment.crt",
+    "key": "/etc/ade/tls/agent-environment.key"
+  },
+  "allowed_origins": [],
+  "wallets": {
+    "authorized": []
+  },
+  "schedule": {
+    "time": "04:00",
+    "timezone": "UTC+8",
+    "persistent": true
+  },
+  "snapshot": {
+    "enabled": false,
+    "name": "agent-environment-__VM_ID__",
+    "artifact_root": "/var/lib/ade/web-artifacts",
+    "base_url": "http://__PUBLIC_HOST__:80"
+  },
+  "manual_trigger": "/usr/local/sbin/agent-environment-trigger",
+  "components": [
+    {
+      "id": "orca",
+      "label": "Orca runtime",
+      "kind": "runtime",
+      "version_file": "/opt/orca/VERSION",
+      "health": {
+        "type": "systemd",
+        "unit": "orca-serve.service"
+      },
+      "update_command": [
+        "/usr/local/sbin/orca-headless-update"
+      ],
+      "target_version_arg": "--target",
+      "enabled": true,
+      "public": true
+    },
+    {
+      "id": "codex",
+      "label": "Codex CLI",
+      "kind": "agent-host",
+      "version_command": [
+        "/home/orca/.local/bin/codex",
+        "--version"
+      ],
+      "health": {
+        "type": "command",
+        "command": [
+          "/home/orca/.local/bin/codex",
+          "--version"
+        ]
+      },
+      "update_command": [
+        "/usr/local/sbin/codex-headless-update"
+      ],
+      "target_version_arg": "--release",
+      "enabled": true,
+      "public": true
+    },
+    {
+      "id": "nginx",
+      "label": "Nginx",
+      "kind": "service",
+      "health": {
+        "type": "systemd",
+        "unit": "nginx.service"
+      },
+      "enabled": true,
+      "public": true
+    },
+    {
+      "id": "artifact-publisher",
+      "label": "Web artifact publisher",
+      "kind": "service",
+      "health": {
+        "type": "http",
+        "url": "http://127.0.0.1:80/healthz",
+        "headers": {
+          "Host": "__PUBLIC_HOST__"
+        }
+      },
+      "dependencies": [
+        "nginx"
+      ],
+      "enabled": true,
+      "public": true
+    },
+    {
+      "id": "codex-proxy",
+      "label": "Codex proxy",
+      "kind": "service",
+      "health": {
+        "type": "systemd",
+        "unit": "codex-proxy.service"
+      },
+      "enabled": true,
+      "public": true
+    },
+    {
+      "id": "headroom-proxy",
+      "label": "Headroom proxy",
+      "kind": "service",
+      "health": {
+        "type": "systemd",
+        "unit": "headroom-proxy.service"
+      },
+      "enabled": true,
+      "public": true
+    }
+  ]
+}

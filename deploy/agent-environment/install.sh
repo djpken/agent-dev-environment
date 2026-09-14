@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+source_root=
+public_host=
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: install.sh --source-root /absolute/path/to/ade --public-host <ip-or-hostname>
+EOF
+}
+
+while (($#)); do
+  case "$1" in
+    --source-root)
+      [[ $# -ge 2 ]] || { usage; exit 2; }
+      source_root=$2
+      shift 2
+      ;;
+    --public-host)
+      [[ $# -ge 2 ]] || { usage; exit 2; }
+      public_host=$2
+      shift 2
+      ;;
+    --help|-h)
+      usage >&2
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+[[ $(id -u) == 0 ]] || { echo 'install.sh must run as root' >&2; exit 1; }
+[[ -n "$source_root" && "$source_root" == /* ]] || { echo '--source-root must be absolute' >&2; exit 2; }
+source_root=$(cd "$source_root" && pwd -P)
+[[ -f "$source_root/pyproject.toml" ]] || { echo "missing pyproject.toml in $source_root" >&2; exit 1; }
+[[ "$public_host" =~ ^[A-Za-z0-9][A-Za-z0-9.:-]*$ ]] || { echo '--public-host contains unsupported characters' >&2; exit 2; }
+
+install -d -o root -g root -m 0755 /etc/ade /etc/ade/tls
+install -d -o root -g orca -m 0770 /var/lib/ade/agent-environment
+
+source_template=$source_root/deploy/agent-environment/agent-environment.env.example
+config_template=$source_root/deploy/agent-environment/agent-environment.json.example
+[[ -f "$source_template" && -f "$config_template" ]] || {
+  echo 'agent-environment deployment templates are missing from source root' >&2
+  exit 1
+}
+
+escaped_source_root=$(printf '%s' "$source_root" | sed 's/[\\&|]/\\&/g')
+temporary_env=$(mktemp /tmp/agent-environment.env.XXXXXX)
+temporary_config=$(mktemp /tmp/agent-environment.json.XXXXXX)
+trap 'rm -f -- "$temporary_env" "$temporary_config"' EXIT
+sed "s|__SOURCE_ROOT__|$escaped_source_root|g" "$source_template" >"$temporary_env"
+install -o root -g root -m 0644 "$temporary_env" /etc/ade/agent-environment.env
+
+if [[ ! -f /etc/ade/agent-environment.json ]]; then
+  vm_id=$(cat /proc/sys/kernel/random/uuid)
+  sed \
+    -e "s|__VM_ID__|$vm_id|g" \
+    -e "s|__SOURCE_ROOT__|$escaped_source_root|g" \
+    -e "s|__PUBLIC_HOST__|$public_host|g" \
+    "$config_template" >"$temporary_config"
+  install -o root -g orca -m 0640 "$temporary_config" /etc/ade/agent-environment.json
+fi
+
+if [[ ! -f /etc/ade/tls/agent-environment.crt || ! -f /etc/ade/tls/agent-environment.key ]]; then
+  if [[ "$public_host" == *:* || "$public_host" =~ ^[0-9.]+$ ]]; then
+    san="IP:$public_host"
+  else
+    san="DNS:$public_host"
+  fi
+  temporary_key=$(mktemp /tmp/agent-environment.key.XXXXXX)
+  temporary_cert=$(mktemp /tmp/agent-environment.crt.XXXXXX)
+  trap 'rm -f -- "$temporary_env" "$temporary_config" "$temporary_key" "$temporary_cert"' EXIT
+  openssl req -x509 -newkey ed25519 -nodes -days 825 \
+    -keyout "$temporary_key" -out "$temporary_cert" \
+    -subj "/CN=$public_host" -addext "subjectAltName=$san" >/dev/null 2>&1
+  install -o root -g orca -m 0640 "$temporary_key" /etc/ade/tls/agent-environment.key
+  install -o root -g orca -m 0644 "$temporary_cert" /etc/ade/tls/agent-environment.crt
+  rm -f -- "$temporary_key" "$temporary_cert"
+fi
+
+install -o root -g root -m 0755 \
+  "$source_root/deploy/agent-environment/ade-environment-service.wrapper" \
+  /usr/local/bin/ade-environment-service
+install -o root -g root -m 0755 \
+  "$source_root/deploy/agent-environment/ade-environment-update.wrapper" \
+  /usr/local/sbin/agent-environment-update
+install -o root -g root -m 0755 \
+  "$source_root/deploy/agent-environment/agent-environment-trigger" \
+  /usr/local/sbin/agent-environment-trigger
+install -o root -g root -m 0755 \
+  "$source_root/deploy/agent-environment/codex-headless-update" \
+  /usr/local/sbin/codex-headless-update
+install -o root -g root -m 0755 \
+  "$source_root/deploy/agent-environment/orca-headless-update" \
+  /usr/local/sbin/orca-headless-update
+install -o root -g root -m 0644 \
+  "$source_root/deploy/agent-environment/agent-environment.service" \
+  /etc/systemd/system/agent-environment.service
+install -o root -g root -m 0644 \
+  "$source_root/deploy/agent-environment/agent-environment-update.service" \
+  /etc/systemd/system/agent-environment-update.service
+install -o root -g root -m 0644 \
+  "$source_root/deploy/agent-environment/agent-environment-update.timer" \
+  /etc/systemd/system/agent-environment-update.timer
+install -o root -g root -m 0440 \
+  "$source_root/deploy/agent-environment/agent-environment.sudoers" \
+  /etc/sudoers.d/agent-environment
+
+visudo -cf /etc/sudoers.d/agent-environment >/dev/null
+systemctl daemon-reload
+if systemctl is-enabled --quiet orca-headless-update.timer 2>/dev/null; then
+  systemctl disable --now orca-headless-update.timer
+fi
+systemctl enable --now agent-environment.service
+systemctl enable --now agent-environment-update.timer
+
+echo "Agent environment service installed for $public_host:6790"
+echo "Schedule: daily 04:00 UTC+8 (20:00 UTC)"

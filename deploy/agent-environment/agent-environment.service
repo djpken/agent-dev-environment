@@ -1,0 +1,27 @@
+[Unit]
+Description=Agent environment management service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orca
+Group=orca
+WorkingDirectory=/
+EnvironmentFile=/etc/ade/agent-environment.env
+Environment=UV_CACHE_DIR=/var/lib/ade/agent-environment/uv-cache
+ExecStart=/usr/local/bin/ade-environment-service --config /etc/ade/agent-environment.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/ade/agent-environment /var/lib/ade/agent-environment/uv-cache
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

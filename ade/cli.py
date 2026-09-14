@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import core, hosts, publish as html_publish, scheduler, sync
+from . import core, environment, hosts, publish as html_publish, scheduler, sync
 
 
 DEFAULT_WEB_ARTIFACT_BASE_URL = "http://172.16.240.41:80"
@@ -218,6 +218,26 @@ def main():
     install_parser.add_argument("--provider", choices=[sync.SYNC_PROVIDER], default=sync.SYNC_PROVIDER)
     install_parser.add_argument("--env-file", type=Path)
     install_parser.add_argument("--enable", action="store_true")
+    env_parser = sub.add_parser("environment")
+    env_sub = env_parser.add_subparsers(dest="environment_operation", required=True)
+    env_service = env_sub.add_parser("service")
+    env_service.add_argument("--config", type=Path, default=environment.DEFAULT_CONFIG_PATH)
+    env_service.add_argument("--host")
+    env_service.add_argument("--port", type=int)
+    env_service.add_argument("--tls-cert", type=Path)
+    env_service.add_argument("--tls-key", type=Path)
+    env_update = env_sub.add_parser("update")
+    env_update.add_argument("--config", type=Path, default=environment.DEFAULT_CONFIG_PATH)
+    env_update.add_argument("--trigger", choices=("scheduled", "manual"), default="scheduled")
+    env_update.add_argument("--run-id")
+    env_update.add_argument("--requested-by", default="system")
+    env_update.add_argument("--component", action="append", dest="components")
+    env_status = env_sub.add_parser("status")
+    env_status.add_argument("--config", type=Path, default=environment.DEFAULT_CONFIG_PATH)
+    env_enroll = env_sub.add_parser("enroll")
+    env_enroll.add_argument("--config", type=Path, default=environment.DEFAULT_CONFIG_PATH)
+    env_enroll.add_argument("--address", required=True)
+    env_enroll.add_argument("--role", choices=environment.ROLES, default="admin")
     args = parser.parse_args()
     try:
         if args.operation in ("plan", "apply"):
@@ -248,6 +268,67 @@ def main():
                 output(install_schedule(args.root, args.provider, args.env_file, args.enable))
                 return 0
             raise core.Error("unknown schedule operation: " + args.schedule_operation)
+        elif args.operation == "environment":
+            config = environment.EnvironmentConfig.load(args.config)
+            if args.environment_operation == "service":
+                if args.host:
+                    config = environment.EnvironmentConfig(
+                        **{**config.__dict__, "listen_host": args.host}
+                    )
+                if args.port:
+                    config = environment.EnvironmentConfig(
+                        **{**config.__dict__, "listen_port": args.port}
+                    )
+                if args.tls_cert or args.tls_key:
+                    config = environment.EnvironmentConfig(
+                        **{
+                            **config.__dict__,
+                            "tls_cert": args.tls_cert or config.tls_cert,
+                            "tls_key": args.tls_key or config.tls_key,
+                        }
+                    )
+                environment.EnvironmentHTTPServer(config).serve_forever()
+                return 0
+            store = environment.RunStore(config.state_root)
+            if args.environment_operation == "status":
+                output({
+                    "config": config.public_config(),
+                    "health": environment.environment_health(config),
+                    "runs": store.list(),
+                    "policy": environment._policy_public(store.read_policy(), config),
+                })
+                return 0
+            if args.environment_operation == "enroll":
+                if os.geteuid() != 0:
+                    raise core.Error("environment wallet enrollment must run as root")
+                raw = environment._read_json(config.path, None)
+                if not isinstance(raw, dict):
+                    raise core.Error("environment config must be a JSON object")
+                if len(environment.base58_decode(args.address)) != 32:
+                    raise core.Error("wallet address must be a Solana public key")
+                wallets = raw.setdefault("wallets", {}).setdefault("authorized", [])
+                if not isinstance(wallets, list):
+                    raise core.Error("wallets.authorized must be a list")
+                wallets = [item for item in wallets if not isinstance(item, dict) or item.get("address") != args.address]
+                wallets.append({"address": args.address, "role": args.role})
+                raw["wallets"]["authorized"] = wallets
+                mode = config.path.stat().st_mode & 0o777
+                owner = config.path.stat()
+                environment._write_json(config.path, raw, mode or 0o640)
+                os.chown(config.path, owner.st_uid, owner.st_gid)
+                output({"address": args.address, "role": args.role, "config": str(config.path)})
+                return 0
+            if args.environment_operation == "update":
+                coordinator = environment.UpdateCoordinator(config, store)
+                run = store.get(args.run_id) if args.run_id else coordinator.create_run(
+                    args.trigger, args.components, args.requested_by
+                )
+                if run is None:
+                    raise core.Error("update run not found: " + args.run_id)
+                result = coordinator.execute(run["id"])
+                output(result)
+                return 0 if result["status"] in {"completed", "blocked"} else 1
+            raise core.Error("unknown environment operation: " + args.environment_operation)
         else:
             release, config = active(args.root)
             if args.operation == "review":

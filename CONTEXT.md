@@ -24,6 +24,34 @@ _Avoid_: ADE runtime repository、Workflow Pack repository
 決定 ADE 工作負載使用哪個 Orca execution host 的命名設定。目前支援 `orca serve` 與 `Local`：前者使用 headless Orca runtime，後者使用目前主機。
 _Avoid_: provider lifecycle、provider profile
 
+**Agent environment service**：
+每台 VM 各自擁有的環境管理面，讓 agent 取得該 VM 的 managed component 狀態，並觸發受控的手動或排程維護。
+_Avoid_: Web artifact publisher、public content page、guest path
+
+**Managed component**：
+由 Agent environment service 登錄並維護狀態的 Orca runtime、Codex、Capability provider 或 VM service。
+_Avoid_: arbitrary process、MCP config、systemd unit
+
+**Environment management surface**：
+Agent environment service 提供的 live dashboard 與 machine-readable API；health 可公開讀取，控制操作需使用 Wallet-signed control request。
+_Avoid_: Web artifact、public content page
+
+**Wallet-signed control request**：
+由使用者的 browser wallet 簽署、授權對指定 VM 或 managed component 執行一次控制操作的請求。
+_Avoid_: private key on VM、unsigned admin command
+
+**Solana wallet identity**：
+由 Solana public address 表示、可在指定 VM 執行受控操作的授權身份；其 private key 永遠留在 browser wallet。
+_Avoid_: wallet balance、on-chain transaction、private key on VM
+
+**Update policy**：
+由授權 wallet 簽署的排程維護規則，限定可更新的 managed component、更新範圍與有效期限。
+_Avoid_: arbitrary scheduled command、unbounded automation
+
+**Update run**：
+一次針對 managed component 執行檢查、更新、重啟或 rollback 的可追蹤維護流程。
+_Avoid_: cron job、arbitrary command
+
 **Composition repository**：
 同時收納 ADE runtime 與 Workflow Pack，定義完整 distribution、元件版本與整合關係的 canonical source。
 _Avoid_: plugin repo、dotfiles repo
@@ -57,6 +85,10 @@ _Avoid_: local file output、preview session
 **Artifact access URL**：
 使用者 browser 開啟 Web artifact 的 HTTP URL。取得 URL 的人都能讀取對應內容。
 _Avoid_: guest path、provider URL
+
+**Environment status snapshot**：
+從 Agent environment service 產生、供一般 browser 讀取的 sanitized VM health 與版本摘要；只有 VM opt-in 時才公開，且不包含控制操作。
+_Avoid_: management API、private runtime state
 
 **Guest path**：
 只在 remote runtime 所在 VM 有效的檔案路徑，不能當成使用者的 Artifact access URL。

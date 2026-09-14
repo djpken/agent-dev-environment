@@ -27,7 +27,9 @@ uv run --frozen ade doctor
 | `ade/core.py` | Bundle、設定合併、plan/apply、rollback |
 | `ade/hosts.py` | Host 設定轉換與 workspace attach |
 | `ade/cli.py` | CLI、review adapter、sync 入口與 process lifecycle |
+| `ade/environment.py` | Per-VM agent environment health、wallet-signed controls、update runs 與 snapshot integration |
 | `ade/sync.py`、`ade/scheduler.py` | Plane 到 Linear reconciliation、local state 與 user-level schedule |
+| `deploy/agent-environment/` | Linux + systemd VM recipe、manager service 與 root-owned updater |
 | `ade.lock.json`、`ade/provider.schema.json` | Provider 版本、能力、權限與健康檢查契約 |
 | `tests/` | Runtime 與 host 整合驗證 |
 

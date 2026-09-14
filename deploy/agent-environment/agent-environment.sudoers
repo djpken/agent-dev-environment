@@ -1,0 +1,3 @@
+# The wrapper validates the UUID and fixes the configuration path before it
+# delegates to the root-owned update runner.
+orca ALL=(root) NOPASSWD: /usr/local/sbin/agent-environment-trigger *

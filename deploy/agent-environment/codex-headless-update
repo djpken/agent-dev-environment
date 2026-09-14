@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+if [[ $(id -u) != 0 ]]; then
+  echo 'codex-headless-update must run as root' >&2
+  exit 1
+fi
+
+release_args=()
+case "${1:-}" in
+  '') ;;
+  --release)
+    [[ -n "${2:-}" && -z "${3:-}" ]] || {
+      echo 'Usage: codex-headless-update [--release VERSION]' >&2
+      exit 2
+    }
+    release_args=(--release "$2")
+    ;;
+  *)
+    echo 'Usage: codex-headless-update [--release VERSION]' >&2
+    exit 2
+    ;;
+esac
+
+runuser -u orca -- env \
+  HOME=/home/orca \
+  CODEX_HOME=/home/orca/.config/orca/codex-runtime-home/home \
+  CODEX_INSTALL_DIR=/home/orca/.local/bin \
+  CODEX_NON_INTERACTIVE=1 \
+  PATH="$PATH" \
+  /bin/sh -c 'curl --proto "=https" --tlsv1.2 -fsSL --retry 3 https://chatgpt.com/codex/install.sh | sh -s -- "$@"' \
+  /bin/sh "${release_args[@]}"
+
+runuser -u orca -- env \
+  HOME=/home/orca \
+  CODEX_HOME=/home/orca/.config/orca/codex-runtime-home/home \
+  PATH="$PATH" \
+  /home/orca/.local/bin/codex --version

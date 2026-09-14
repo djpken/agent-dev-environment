@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ $# -ne 1 || ! "$1" =~ ^[0-9a-f-]{36}$ ]]; then
+  echo 'usage: agent-environment-trigger <run-id>' >&2
+  exit 2
+fi
+
+exec /usr/local/sbin/agent-environment-update \
+  --config /etc/ade/agent-environment.json \
+  --run-id "$1" \
+  --trigger manual

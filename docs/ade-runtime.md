@@ -96,6 +96,14 @@ uv run --frozen ade publish-html delete architecture
 
 單檔 HTML 會以 `index.html` 作為 entrypoint；bundle 可包含 HTML、PNG、CSS 與 JS。CLI 會先檢查 `http://127.0.0.1:80/healthz`，服務不可用時回報 `publish blocked`，不把 guest path 當成 browser URL。nginx 設定樣板位於 [`deploy/ade-web-artifacts/`](../deploy/ade-web-artifacts/)。
 
+## Agent environment service
+
+`Agent environment service` 是每台 VM 獨立的管理面，與 Web artifact publisher 分開。它以 allowlist 登錄 Orca、Codex、Capability provider 與 VM services，提供公開 read-only health/dashboard、JSON API、wallet-signed manual controls、signed update policy 與 update history。元件可宣告 `target_version_arg`，讓簽署的目標版本以 argv 傳給固定更新器；內建 Orca updater 會驗證 release manifest 的版本、大小與 SHA-512。
+
+Linux + systemd VM 可用 [`deploy/agent-environment/`](../deploy/agent-environment/) 安裝。預設管理面使用 HTTPS port `6790`，每日 `04:00 UTC+8` 執行更新，也就是 `20:00 UTC`；`Persistent=true` 會在 VM 錯過時間後補跑。更新由 root-owned helper 執行，Orca 與 Codex 會依 manifest 的固定 command 更新，MCP 與其他 service 只有登錄後才會被管理。
+
+管理面可公開讀取 health，但更新、restart、rollback 與 policy 變更都需要 Solana wallet signature。`Environment status snapshot` 預設不發布，VM opt-in 後才用 `ade publish-html` 發布到獨立的 artifact publisher；snapshot 只含 sanitized health、版本與時間資訊。
+
 ## Review
 
 先在 user config 設定明確 `llm_endpoint` 與 OCR grants，再重新 plan/apply。只有執行 review 時才從指定環境變數讀取 credential；credential 不寫入 lockfile、generation 或 CLI arguments。

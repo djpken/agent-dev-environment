@@ -1,0 +1,13 @@
+[Unit]
+Description=Update allowlisted agent environment components
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/agent-environment-update --config /etc/ade/agent-environment.json --trigger scheduled
+UMask=0077
+TimeoutStartSec=30min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6

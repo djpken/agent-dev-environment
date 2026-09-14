@@ -7,7 +7,11 @@ name = "agent-dev-environment"
 version = "0.1.0"
 description = "Local-first agent environment composition and lifecycle manager"
 requires-python = ">=3.11"
-dependencies = ["jsonschema==4.26.0", "tomlkit==0.13.3"]
+dependencies = [
+    "cryptography==50.0.1",
+    "jsonschema==4.26.0",
+    "tomlkit==0.13.3",
+]
 
 [project.scripts]
 ade = "ade.cli:main"

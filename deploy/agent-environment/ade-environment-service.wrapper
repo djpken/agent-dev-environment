@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+source /etc/ade/agent-environment.env
+exec /home/orca/.local/bin/uv run --frozen --project "$ADE_SOURCE_ROOT" \
+  python -m ade.cli environment service "$@"

@@ -1,0 +1,292 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+readonly INSTALL_ROOT=/opt/orca
+readonly APP_IMAGE="$INSTALL_ROOT/orca-linux.AppImage"
+readonly VERSION_FILE="$INSTALL_ROOT/VERSION"
+readonly SERVICE=orca-serve.service
+readonly RELEASES_URL=https://github.com/stablyai/orca/releases/latest
+readonly RELEASE_DOWNLOAD_ROOT=https://github.com/stablyai/orca/releases/download
+readonly ROLLBACK_KEEP=2
+
+log() {
+  printf '[orca-headless-update] %s\n' "$*"
+}
+
+fail() {
+  log "ERROR: $*" >&2
+  exit 1
+}
+
+resolve_latest_version() {
+  local effective_url
+  effective_url=$(curl --proto '=https' --tlsv1.2 -fsSL --retry 3 \
+    -o /dev/null -w '%{url_effective}' "$RELEASES_URL")
+  basename "${effective_url%/}"
+}
+
+validate_version() {
+  [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "Invalid stable release tag: $1"
+}
+
+version_is_newer() {
+  local candidate=$1 current=$2 highest
+  highest=$(printf '%s\n%s\n' "$candidate" "$current" | sort -V | tail -n 1)
+  [[ "$candidate" != "$current" && "$highest" == "$candidate" ]]
+}
+
+read_current_version() {
+  [[ -f "$VERSION_FILE" ]] || fail "Missing $VERSION_FILE"
+  tr -d '[:space:]' <"$VERSION_FILE"
+}
+
+check_capacity() {
+  local profile_bytes binary_bytes available_bytes required_bytes
+  profile_bytes=$(du -sB1 /home/orca/.config | awk '{print $1}')
+  binary_bytes=$(stat -c %s "$APP_IMAGE")
+  available_bytes=$(df -PB1 "$INSTALL_ROOT" | awk 'NR == 2 {print $4}')
+  required_bytes=$((profile_bytes + binary_bytes * 2 + 536870912))
+  ((available_bytes >= required_bytes)) || \
+    fail "Insufficient space in $INSTALL_ROOT: need $required_bytes bytes, have $available_bytes"
+}
+
+prune_rollbacks() {
+  local rollback
+  local -a rollbacks=()
+  mapfile -t rollbacks < <(
+    find "$INSTALL_ROOT" -mindepth 1 -maxdepth 1 -type d \
+      -name 'orca-rollback-*.ready' -print | sort
+  )
+  while ((${#rollbacks[@]} > ROLLBACK_KEEP)); do
+    rollback=${rollbacks[0]}
+    [[ "$rollback" == "$INSTALL_ROOT"/orca-rollback-*.ready ]] || \
+      fail "Refusing unexpected rollback path: $rollback"
+    log "Pruning old rollback bundle: $rollback"
+    rm -rf -- "$rollback"
+    rollbacks=("${rollbacks[@]:1}")
+  done
+}
+
+wait_until_healthy() {
+  local started_at=$1 attempt
+  for attempt in $(seq 1 60); do
+    if systemctl is-active --quiet "$SERVICE" && \
+      journalctl -u "$SERVICE" --since "@$started_at" --no-pager -o cat | \
+        grep -q '"type":"orca_server_ready"'; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+verify_release_manifest() {
+  local manifest=$1 expected_version=$2 expected_asset=$3 downloaded=$4
+  local manifest_version expected_sha expected_size actual_sha actual_size
+  manifest_version=$(awk -F': *' '$1 == "version" {print $2; exit}' "$manifest" | tr -d '[:space:]' | tr -d "'\"")
+  [[ "$manifest_version" == "${expected_version#v}" ]] || \
+    fail "Release manifest version mismatch: expected ${expected_version#v}, got $manifest_version"
+
+  expected_sha=$(awk -v asset="$expected_asset" '
+    /^[[:space:]]*-[[:space:]]+url:[[:space:]]*/ {
+      url = $0
+      sub(/^[[:space:]]*-[[:space:]]+url:[[:space:]]*/, "", url)
+    }
+    /^[[:space:]]+sha512:[[:space:]]*/ && url == asset {
+      value = $0
+      sub(/^[[:space:]]+sha512:[[:space:]]*/, "", value)
+      print value
+      exit
+    }
+  ' "$manifest")
+  expected_size=$(awk -v asset="$expected_asset" '
+    /^[[:space:]]*-[[:space:]]+url:[[:space:]]*/ {
+      url = $0
+      sub(/^[[:space:]]*-[[:space:]]+url:[[:space:]]*/, "", url)
+    }
+    /^[[:space:]]+size:[[:space:]]*/ && url == asset {
+      value = $0
+      sub(/^[[:space:]]+size:[[:space:]]*/, "", value)
+      print value
+      exit
+    }
+  ' "$manifest")
+  [[ "$expected_sha" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] || \
+    fail "Release manifest has no SHA-512 for $expected_asset"
+  [[ "$expected_size" =~ ^[0-9]+$ ]] || \
+    fail "Release manifest has no size for $expected_asset"
+
+  actual_size=$(stat -c %s "$downloaded")
+  [[ "$actual_size" == "$expected_size" ]] || \
+    fail "Downloaded asset size mismatch: expected $expected_size, got $actual_size"
+  actual_sha=$(openssl dgst -sha512 -binary "$downloaded" | base64 | tr -d '\n')
+  [[ "$actual_sha" == "$expected_sha" ]] || \
+    fail "Downloaded asset SHA-512 mismatch"
+  log "Verified $expected_asset: ${actual_size} bytes, SHA-512 $actual_sha"
+}
+
+mode=update
+target_version=
+case "${1:-}" in
+  '') ;;
+  --check) mode=check ;;
+  --target)
+    [[ -n "${2:-}" && -z "${3:-}" ]] || fail 'Usage: orca-headless-update [--check | --target vX.Y.Z]'
+    target_version=$2
+    ;;
+  *) fail 'Usage: orca-headless-update [--check | --target vX.Y.Z]' ;;
+esac
+
+exec 9>/run/lock/orca-headless-update.lock
+if ! flock -n 9; then
+  log 'Another update is already running; exiting.'
+  exit 0
+fi
+
+[[ $(id -u) == 0 ]] || fail 'Must run as root'
+[[ -d "$INSTALL_ROOT" && ! -L "$INSTALL_ROOT" ]] || fail "Unsafe install root: $INSTALL_ROOT"
+[[ -f "$APP_IMAGE" && ! -L "$APP_IMAGE" ]] || fail "Unsafe AppImage path: $APP_IMAGE"
+[[ -d /home/orca/.config && ! -L /home/orca/.config ]] || fail 'Unsafe Orca profile path'
+
+current_version=$(read_current_version)
+validate_version "$current_version"
+if [[ -z "$target_version" ]]; then
+  target_version=$(resolve_latest_version)
+fi
+validate_version "$target_version"
+
+log "Current: $current_version; candidate: $target_version"
+if ! version_is_newer "$target_version" "$current_version"; then
+  log 'No newer stable release is available.'
+  exit 0
+fi
+if [[ "$mode" == check ]]; then
+  log "Update available: $target_version"
+  exit 0
+fi
+
+case "$(uname -m)" in
+  x86_64)
+    asset=orca-linux.AppImage
+    file_machine=x86-64
+    metadata=latest-linux.yml
+    ;;
+  aarch64 | arm64)
+    asset=orca-linux-arm64.AppImage
+    file_machine='ARM aarch64'
+    metadata=latest-linux-arm64.yml
+    ;;
+  *) fail "Unsupported architecture: $(uname -m)" ;;
+esac
+
+check_capacity
+staged_manifest=$(mktemp "$INSTALL_ROOT/.latest-linux.yml.XXXXXX")
+staged_image=$(mktemp "$INSTALL_ROOT/.orca-linux.AppImage.new.XXXXXX")
+staged_version=$(mktemp "$INSTALL_ROOT/.VERSION.new.XXXXXX")
+rollback_new=
+rollback_ready=
+service_stopped=0
+binary_promoted=0
+new_version_started=0
+
+recover() {
+  local exit_status=$? profile_dir failed_profile recovery_ok=1
+  trap - EXIT
+  set +e
+  rm -f -- "$staged_manifest" "$staged_image" "$staged_version"
+  [[ $exit_status -ne 0 ]] || return 0
+  log "Update failed with status $exit_status; restoring $current_version."
+  if [[ -n "$rollback_new" && -d "$rollback_new" ]]; then
+    rm -rf -- "$rollback_new"
+  fi
+  if ((service_stopped)); then
+    systemctl stop "$SERVICE" || true
+    if ((binary_promoted)); then
+      cp -a "$rollback_ready/orca-linux.AppImage" "$INSTALL_ROOT/.orca-linux.AppImage.recovering" && \
+        mv -f "$INSTALL_ROOT/.orca-linux.AppImage.recovering" "$APP_IMAGE" || recovery_ok=0
+      cp -a "$rollback_ready/VERSION" "$INSTALL_ROOT/.VERSION.recovering" && \
+        mv -f "$INSTALL_ROOT/.VERSION.recovering" "$VERSION_FILE" || recovery_ok=0
+    fi
+    if ((new_version_started)) && [[ -f "$rollback_ready/profile.tgz" ]]; then
+      failed_profile="/home/orca/.config/orca-failed-update-$(date +%F-%H%M%S-%N)"
+      install -d -o orca -g orca -m 700 "$failed_profile" || recovery_ok=0
+      for profile_dir in orca Orca; do
+        if [[ -d "/home/orca/.config/$profile_dir" && ! -L "/home/orca/.config/$profile_dir" ]]; then
+          mv "/home/orca/.config/$profile_dir" "$failed_profile/" || recovery_ok=0
+        fi
+      done
+      tar xzf "$rollback_ready/profile.tgz" -C /home/orca/.config || recovery_ok=0
+      for profile_dir in orca Orca; do
+        [[ ! -d "/home/orca/.config/$profile_dir" ]] || \
+          chown -R orca:orca "/home/orca/.config/$profile_dir" || recovery_ok=0
+      done
+    fi
+    systemctl reset-failed "$SERVICE" || true
+    if ((recovery_ok)); then
+      systemctl start "$SERVICE" || true
+    else
+      log 'Recovery was incomplete; the service remains stopped.' >&2
+    fi
+  fi
+  exit "$exit_status"
+}
+trap recover EXIT
+
+metadata_url="$RELEASE_DOWNLOAD_ROOT/$target_version/$metadata"
+log "Downloading release manifest $metadata_url"
+curl --proto '=https' --tlsv1.2 -fL --retry 3 "$metadata_url" -o "$staged_manifest"
+
+download_url="$RELEASE_DOWNLOAD_ROOT/$target_version/$asset"
+log "Downloading $download_url"
+curl --proto '=https' --tlsv1.2 -fL --retry 3 "$download_url" -o "$staged_image"
+chown root:root "$staged_image"
+chmod 755 "$staged_image"
+file_info=$(LC_ALL=C file "$staged_image")
+grep -q 'ELF .* executable' <<<"$file_info" || fail 'Downloaded asset is not an ELF executable'
+grep -Fq "$file_machine" <<<"$file_info" || fail "Downloaded asset has the wrong architecture: $file_info"
+verify_release_manifest "$staged_manifest" "$target_version" "$asset" "$staged_image"
+printf '%s\n' "$target_version" >"$staged_version"
+chown root:root "$staged_version"
+chmod 644 "$staged_version"
+
+stamp=$(date +%F-%H%M%S-%N)
+rollback_new="$INSTALL_ROOT/orca-rollback-$stamp.new"
+rollback_ready="$INSTALL_ROOT/orca-rollback-$stamp.ready"
+install -d -o root -g root -m 700 "$rollback_new"
+cp -a "$APP_IMAGE" "$rollback_new/orca-linux.AppImage"
+cp -a "$VERSION_FILE" "$rollback_new/VERSION"
+
+log "Stopping $SERVICE for a consistent profile backup."
+service_stopped=1
+systemctl stop "$SERVICE"
+profile_dirs=()
+for profile_dir in orca Orca; do
+  [[ ! -L "/home/orca/.config/$profile_dir" ]] || fail "Refusing symlinked profile: $profile_dir"
+  if [[ -d "/home/orca/.config/$profile_dir" ]]; then
+    if [[ "$profile_dir" == Orca && -d /home/orca/.config/orca ]] && \
+      test /home/orca/.config/orca -ef /home/orca/.config/Orca; then
+      continue
+    fi
+    profile_dirs+=("$profile_dir")
+  fi
+done
+((${#profile_dirs[@]} > 0)) || fail 'No Orca profile directory found'
+tar czf "$rollback_new/profile.tgz" -C /home/orca/.config "${profile_dirs[@]}"
+chmod 600 "$rollback_new/profile.tgz"
+mv "$rollback_new" "$rollback_ready"
+rollback_new=
+
+mv -f "$staged_image" "$APP_IMAGE"
+mv -f "$staged_version" "$VERSION_FILE"
+binary_promoted=1
+started_at=$(date +%s)
+systemctl reset-failed "$SERVICE"
+new_version_started=1
+systemctl start "$SERVICE"
+wait_until_healthy "$started_at" || fail "$SERVICE did not become healthy within 120 seconds"
+service_stopped=0
+prune_rollbacks
+rm -f -- "$staged_manifest"
+log "Updated successfully to $target_version."
+trap - EXIT
