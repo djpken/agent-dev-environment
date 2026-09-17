@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+[[ $(id -u) == 0 ]] || { echo 'agent-environment-enroll must run as root' >&2; exit 1; }
+[[ $# -eq 0 ]] || { echo 'agent-environment-enroll does not accept command arguments' >&2; exit 2; }
+
+source /etc/ade/agent-environment.env
+# sudo resets the service environment; its default /root cache is read-only.
+export UV_CACHE_DIR=/var/lib/ade/agent-environment/root-uv-cache
+request=$(</dev/stdin)
+[[ -n "$request" && ${#request} -le 65536 ]] || {
+  echo 'signed enrollment request is empty or too large' >&2
+  exit 2
+}
+
+exec /home/orca/.local/bin/uv run --frozen --no-sync --project "$ADE_SOURCE_ROOT" \
+  python -m ade.cli environment enroll-signed \
+  --config /etc/ade/agent-environment.json \
+  --request-json "$request"

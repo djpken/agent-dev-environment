@@ -11,6 +11,7 @@ import contextlib
 import datetime as dt
 import fcntl
 import html
+import hashlib
 import json
 import os
 import re
@@ -27,20 +28,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from eth_account import Account
+from eth_account.messages import encode_defunct
+from eth_keys.exceptions import BadSignature
 
 
 ENVIRONMENT_VERSION = "1"
 DEFAULT_CONFIG_PATH = Path("/etc/ade/agent-environment.json")
 STATUS_VALUES = ("healthy", "degraded", "unhealthy", "unknown", "updating")
 ROLES = ("viewer", "operator", "admin")
-BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 UNIT_PATTERN = re.compile(r"^[A-Za-z0-9_.@:%+-]+$")
 RUN_ID_PATTERN = re.compile(r"^[0-9a-f-]{36}$")
 TARGET_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
 TARGET_VERSION_ARG_PATTERN = re.compile(r"^--[A-Za-z0-9][A-Za-z0-9-]{0,31}$")
+REGISTRATION_NONCE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 
 
 class EnvironmentError(ValueError):
@@ -109,42 +111,21 @@ def _locked(path: Path):
             fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
-def base58_decode(value: str) -> bytes:
-    if not isinstance(value, str):
-        raise EnvironmentError("Solana address or signature is required")
-    if value == "":
-        return b""
-    number = 0
-    for character in value:
-        try:
-            number = number * 58 + BASE58_ALPHABET.index(character)
-        except ValueError as exc:
-            raise EnvironmentError("invalid base58 value") from exc
-    raw = b"" if number == 0 else number.to_bytes((number.bit_length() + 7) // 8, "big")
-    return (b"\x00" * (len(value) - len(value.lstrip("1")))) + raw
+def normalize_wallet_address(address: str) -> str:
+    if not isinstance(address, str) or not re.fullmatch(r"0x[0-9a-fA-F]{40}", address):
+        raise EnvironmentError("wallet address must be a 0x-prefixed Ethereum address")
+    return address.lower()
 
 
-def base58_encode(value: bytes) -> str:
-    if not value:
-        return ""
-    number = int.from_bytes(value, "big")
-    characters = []
-    while number:
-        number, remainder = divmod(number, 58)
-        characters.append(BASE58_ALPHABET[remainder])
-    prefix = len(value) - len(value.lstrip(b"\x00"))
-    return "1" * prefix + ("".join(reversed(characters)) if characters else "")
-
-
-def verify_solana_signature(address: str, message: bytes, signature: str) -> bool:
+def verify_wallet_signature(address: str, message: bytes, signature: str) -> bool:
+    """Verify MetaMask personal_sign (EIP-191) without an RPC or private key."""
     try:
-        public_key = base58_decode(address)
-        signature_bytes = base58_decode(signature)
-        if len(public_key) != 32 or len(signature_bytes) != 64:
+        address = normalize_wallet_address(address)
+        if not isinstance(signature, str) or not re.fullmatch(r"0x[0-9a-fA-F]{130}", signature):
             return False
-        Ed25519PublicKey.from_public_bytes(public_key).verify(signature_bytes, message)
-        return True
-    except (EnvironmentError, InvalidSignature, ValueError):
+        recovered = Account.recover_message(encode_defunct(primitive=message), signature=signature)
+        return secrets.compare_digest(recovered.lower(), address)
+    except (EnvironmentError, ValueError, TypeError, BadSignature):
         return False
 
 
@@ -358,6 +339,8 @@ class EnvironmentConfig:
     schedule: Mapping[str, Any]
     snapshot: Mapping[str, Any]
     manual_trigger: Path
+    registration_trigger: Path
+    authorization_trigger: Path
 
     @classmethod
     def load(cls, path: str | Path) -> "EnvironmentConfig":
@@ -387,7 +370,10 @@ class EnvironmentConfig:
         tls_key = Path(tls["key"]).expanduser().resolve() if tls.get("key") else None
         if (tls_cert is None) != (tls_key is None):
             raise EnvironmentError("tls.cert and tls.key must be supplied together")
-        if listen_host not in {"127.0.0.1", "::1", "localhost"} and tls_cert is None:
+        allow_http = raw.get("allow_http", False)
+        if not isinstance(allow_http, bool):
+            raise EnvironmentError("allow_http must be a boolean")
+        if listen_host not in {"127.0.0.1", "::1", "localhost"} and tls_cert is None and not allow_http:
             raise EnvironmentError("TLS is required when the environment service is not loopback-only")
         allowed_origins = raw.get("allowed_origins", [])
         if not isinstance(allowed_origins, list) or not all(isinstance(item, str) for item in allowed_origins):
@@ -410,12 +396,7 @@ class EnvironmentConfig:
         for item in wallets:
             if not isinstance(item, Mapping) or not isinstance(item.get("address"), str) or item.get("role") not in ROLES:
                 raise EnvironmentError("wallet entries require address and viewer/operator/admin role")
-            try:
-                if len(base58_decode(item["address"])) != 32:
-                    raise EnvironmentError("wallet address must be a Solana public key")
-            except EnvironmentError:
-                raise
-            authorized.append({"address": item["address"], "role": item["role"]})
+            authorized.append({"address": normalize_wallet_address(item["address"]), "role": item["role"]})
         schedule = raw.get("schedule", {})
         if not isinstance(schedule, Mapping):
             raise EnvironmentError("schedule must be an object")
@@ -425,6 +406,9 @@ class EnvironmentConfig:
         if not isinstance(snapshot, Mapping):
             raise EnvironmentError("snapshot must be an object")
         manual_trigger = Path(raw.get("manual_trigger", "/usr/local/sbin/agent-environment-trigger")).expanduser().resolve()
+        registration_trigger = Path(
+            raw.get("registration_trigger", "/usr/local/sbin/agent-environment-enroll")
+        ).expanduser().resolve()
         return cls(
             path=config_path,
             vm_id=vm_id,
@@ -441,6 +425,8 @@ class EnvironmentConfig:
             schedule=dict(schedule),
             snapshot=dict(snapshot),
             manual_trigger=manual_trigger,
+            registration_trigger=registration_trigger,
+            authorization_trigger=Path(raw.get("authorization_trigger", "/usr/local/sbin/agent-environment-authorize")).expanduser().resolve(),
         )
 
     def component_map(self) -> dict[str, Component]:
@@ -451,6 +437,7 @@ class EnvironmentConfig:
             "version": ENVIRONMENT_VERSION,
             "vm_id": self.vm_id,
             "public_origin": self.public_origin,
+            "registration_required": not bool(self.authorized_wallets),
             "schedule": {"time": "04:00", "timezone": "UTC+8", "persistent": True},
             "snapshot": {"enabled": bool(self.snapshot.get("enabled", False))},
         }
@@ -576,6 +563,108 @@ def control_payload(message: str) -> dict[str, Any]:
     return payload
 
 
+def registration_message(
+    vm_id: str,
+    address: str,
+    nonce: str,
+    issued_at: str,
+    expires_at: str,
+) -> str:
+    payload = {
+        "action": "register",
+        "address": address,
+        "expires_at": expires_at,
+        "issued_at": issued_at,
+        "nonce": nonce,
+        "role": "admin",
+        "vm_binding": hashlib.sha256(vm_id.encode()).hexdigest(),
+    }
+    return "ADE-ENVIRONMENT-REGISTRATION-V1\n" + _json_bytes(payload).decode("utf-8")
+
+
+def registration_payload(message: str) -> dict[str, Any]:
+    prefix = "ADE-ENVIRONMENT-REGISTRATION-V1\n"
+    if not isinstance(message, str) or not message.startswith(prefix):
+        raise EnvironmentError("registration message has an invalid prefix")
+    try:
+        payload = json.loads(message.removeprefix(prefix))
+    except json.JSONDecodeError as exc:
+        raise EnvironmentError("registration message is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise EnvironmentError("registration message payload must be an object")
+    required = {"action", "address", "expires_at", "issued_at", "nonce", "role", "vm_binding"}
+    if set(payload) != required:
+        raise EnvironmentError("registration message fields are invalid")
+    return payload
+
+
+def verify_registration_request(
+    config: EnvironmentConfig,
+    address: str,
+    message: str,
+    signature: str,
+) -> tuple[bool, str]:
+    if config.authorized_wallets:
+        return False, "registration is already complete"
+    try:
+        address = normalize_wallet_address(address)
+        payload = registration_payload(message)
+        if payload["action"] != "register" or payload["role"] != "admin":
+            return False, "registration role or action is invalid"
+        if payload["address"] != address or payload["vm_binding"] != hashlib.sha256(config.vm_id.encode()).hexdigest():
+            return False, "registration identity does not match this VM"
+        if not isinstance(payload["nonce"], str) or not REGISTRATION_NONCE_PATTERN.fullmatch(payload["nonce"]):
+            return False, "registration nonce is invalid"
+        issued_at = parse_timestamp(payload["issued_at"])
+        expires_at = parse_timestamp(payload["expires_at"])
+        now = utc_now()
+        if issued_at > now + dt.timedelta(minutes=1):
+            return False, "registration message is issued in the future"
+        if expires_at <= now or expires_at <= issued_at:
+            return False, "registration message has expired"
+        if expires_at - issued_at > dt.timedelta(minutes=15):
+            return False, "registration message lifetime is too long"
+        if not verify_wallet_signature(address, message.encode("utf-8"), signature):
+            return False, "registration signature is invalid"
+    except (EnvironmentError, KeyError, TypeError, ValueError) as exc:
+        return False, str(exc)
+    return True, "ok"
+
+
+def enroll_signed_wallet(
+    config: EnvironmentConfig,
+    address: str,
+    message: str,
+    signature: str,
+) -> dict[str, Any]:
+    """Atomically enroll the first wallet through the root-only helper."""
+    if os.geteuid() != 0:
+        raise EnvironmentError("signed wallet enrollment must run as root")
+    address = normalize_wallet_address(address)
+    lock_path = config.state_root / ".registration.lock"
+    with _locked(lock_path):
+        current = EnvironmentConfig.load(config.path)
+        valid, reason = verify_registration_request(current, address, message, signature)
+        if not valid:
+            raise EnvironmentError(reason)
+        raw = _read_json(current.path, None)
+        if not isinstance(raw, dict):
+            raise EnvironmentError("environment config must be a JSON object")
+        wallets_config = raw.setdefault("wallets", {})
+        if not isinstance(wallets_config, dict):
+            raise EnvironmentError("wallets must be an object")
+        wallets = wallets_config.setdefault("authorized", [])
+        if not isinstance(wallets, list):
+            raise EnvironmentError("wallets.authorized must be a list")
+        if wallets:
+            raise EnvironmentError("registration is already complete")
+        owner = current.path.stat()
+        wallets_config["authorized"] = [{"address": address, "role": "admin"}]
+        _write_json(current.path, raw, current.path.stat().st_mode & 0o777 or 0o640)
+        os.chown(current.path, owner.st_uid, owner.st_gid)
+    return {"registered": True, "address": address, "role": "admin", "config": str(config.path)}
+
+
 def validate_target_versions(
     config: EnvironmentConfig,
     component_ids: list[str] | tuple[str, ...] | set[str],
@@ -601,33 +690,15 @@ def validate_target_versions(
 
 
 def verify_control_authorization(config: EnvironmentConfig, run: Mapping[str, Any]) -> tuple[bool, str]:
-    authorization = run.get("authorization")
-    if not isinstance(authorization, Mapping):
-        return False, "manual run has no wallet authorization"
-    signer = authorization.get("address")
-    signature = authorization.get("signature")
-    message = authorization.get("message")
-    if not all(isinstance(item, str) for item in (signer, signature, message)):
-        return False, "manual run authorization is incomplete"
-    if wallet_role(config, signer) not in {"operator", "admin"}:
-        return False, "manual run signer is not authorized"
-    try:
-        payload = control_payload(message)
-        if payload["vm_id"] != config.vm_id:
-            return False, "manual run VM identity does not match"
-        if payload["action"] != run.get("action", "update"):
-            return False, "manual run action does not match its signature"
-        if set(payload["component_ids"]) != set(run.get("component_ids", [])):
-            return False, "manual run components do not match its signature"
-        if dict(payload["target_versions"]) != dict(run.get("target_versions", {})):
-            return False, "manual run targets do not match its signature"
-        if not verify_solana_signature(signer, message.encode("utf-8"), signature):
-            return False, "manual run signature is invalid"
-        if parse_timestamp(payload["expires_at"]) <= utc_now():
-            return False, "manual run authorization has expired"
-    except (EnvironmentError, KeyError, TypeError, ValueError) as exc:
-        return False, str(exc)
-    return True, "ok"
+    from .environment_auth import EnvironmentAuthority
+
+    return EnvironmentAuthority(config).consume_run(run)
+
+
+def read_environment_policy(config: EnvironmentConfig) -> dict[str, Any] | None:
+    from .environment_auth import EnvironmentAuthority
+
+    return EnvironmentAuthority(config).read_policy()
 
 
 def policy_message(policy: Mapping[str, Any]) -> str:
@@ -645,6 +716,10 @@ def policy_message(policy: Mapping[str, Any]) -> str:
 
 
 def wallet_role(config: EnvironmentConfig, address: str) -> str | None:
+    try:
+        address = normalize_wallet_address(address)
+    except EnvironmentError:
+        return None
     for wallet in config.authorized_wallets:
         if wallet["address"] == address:
             return wallet["role"]
@@ -653,7 +728,13 @@ def wallet_role(config: EnvironmentConfig, address: str) -> str | None:
 
 def verify_policy(config: EnvironmentConfig, policy: Mapping[str, Any] | None) -> tuple[bool, str]:
     if not policy:
-        return False, "no signed update policy is enrolled"
+        return False, "daily updates are not enabled"
+    if policy.get("authorization") == "session":
+        # Only the root-owned canonical record authorizes persistent schedules.
+        if policy != read_environment_policy(config):
+            return False, "policy does not match the approved schedule"
+        if not policy.get("enabled"):
+            return False, "daily updates are disabled"
     if policy.get("vm_id") != config.vm_id:
         return False, "policy VM identity does not match"
     if policy.get("release_channel", "stable") != "stable":
@@ -670,11 +751,13 @@ def verify_policy(config: EnvironmentConfig, policy: Mapping[str, Any] | None) -
         return False, str(exc)
     if target_versions != dict(sorted((policy.get("target_versions") or {}).items())):
         return False, "policy target versions are invalid"
+    if policy.get("authorization") == "session":
+        return True, "daily updates enabled until disabled"
     signer = policy.get("signer")
     signature = policy.get("signature")
     if not isinstance(signer, str) or wallet_role(config, signer) not in {"operator", "admin"}:
         return False, "policy signer is not authorized"
-    if not isinstance(signature, str) or not verify_solana_signature(signer, policy_message(policy).encode(), signature):
+    if not isinstance(signature, str) or not verify_wallet_signature(signer, policy_message(policy).encode(), signature):
         return False, "policy signature is invalid"
     try:
         if parse_timestamp(str(policy["expires_at"])) <= utc_now():
@@ -849,7 +932,7 @@ class UpdateCoordinator:
         authorization: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         if trigger == "scheduled" and component_ids is None:
-            policy = self.store.read_policy()
+            policy = read_environment_policy(self.config)
             selected = list(policy.get("components", [])) if isinstance(policy, Mapping) else []
             target_versions = policy.get("target_versions", {}) if isinstance(policy, Mapping) else {}
         else:
@@ -869,12 +952,18 @@ class UpdateCoordinator:
         validated_targets = validate_target_versions(self.config, selected, target_versions)
         return self.store.create(trigger, selected, requested_by, action, validated_targets, authorization)
 
-    def execute(self, run_id: str) -> dict[str, Any]:
+    def execute(self, run_id: str, expected_trigger: str | None = None) -> dict[str, Any]:
         run = self.store.get(run_id)
         if run is None:
             raise EnvironmentError(f"update run not found: {run_id}")
+        if expected_trigger is not None and run.get("trigger") != expected_trigger:
+            raise EnvironmentError("update run trigger does not match the privileged invocation")
+        if run.get("trigger") not in {"scheduled", "manual"}:
+            raise EnvironmentError("unsupported update trigger")
+        if run.get("status") != "queued":
+            raise EnvironmentError("update run has already started")
         if run.get("trigger") == "scheduled":
-            policy = self.store.read_policy()
+            policy = read_environment_policy(self.config)
             valid, reason = verify_policy(self.config, policy)
             if not valid:
                 blocked = self.store.update(
@@ -885,12 +974,14 @@ class UpdateCoordinator:
                 )
                 publication = publish_snapshot(self.config, environment_health(self.config), blocked)
                 return self.store.update(run_id, publication=publication) if publication else blocked
-            if set(run.get("component_ids", [])) != set(policy["components"]):
+            if (set(run.get("component_ids", [])) != set(policy["components"])
+                    or run.get("action") != "update"
+                    or run.get("target_versions", {}) != policy.get("target_versions", {})):
                 blocked = self.store.update(
                     run_id,
                     status="blocked",
                     finished_at=iso_now(),
-                    error="scheduled run does not match the signed policy",
+                    error="scheduled run does not match the approved policy",
                 )
                 publication = publish_snapshot(self.config, environment_health(self.config), blocked)
                 return self.store.update(run_id, publication=publication) if publication else blocked
@@ -985,44 +1076,228 @@ class UpdateCoordinator:
 
 
 def dashboard_html(config: EnvironmentConfig) -> str:
-    vm_id = html.escape(config.vm_id)
-    return f"""<!doctype html>
+    return """<!doctype html>
 <html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
-<title>Agent environment · {vm_id}</title>
+<title>Sign in · Agent environment</title>
 <style>
-:root{{color-scheme:dark;font:15px system-ui,sans-serif;background:#0d1117;color:#eef2f6}}
-body{{margin:0;padding:28px}}main{{max-width:1100px;margin:auto}}header{{display:flex;justify-content:space-between;gap:16px;align-items:start;margin-bottom:24px}}
-h1{{font-size:30px;margin:0 0 6px}}p{{color:#aab5c1;margin:6px 0}}button{{border:1px solid #3c84b7;background:#17344a;color:#e9f5ff;border-radius:8px;padding:9px 13px;cursor:pointer}}button:disabled{{opacity:.45;cursor:not-allowed}}
-.panel{{background:#151b23;border:1px solid #2b3542;border-radius:14px;padding:18px;margin:16px 0}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}}
-.card{{background:#1a212b;border:1px solid #2b3542;border-radius:12px;padding:15px}}.card h3{{margin:0 0 8px;font-size:16px}}.muted{{color:#9ca9b7;font-size:13px}}
-.badge{{display:inline-block;border-radius:999px;padding:4px 9px;font-size:12px;margin-bottom:8px}}.healthy{{background:#123d2a;color:#7ce2a5}}.degraded,.unknown{{background:#433514;color:#ffd37a}}.unhealthy{{background:#4b1e27;color:#ff9aa8}}.updating{{background:#233860;color:#a8c9ff}}
-code{{color:#a6d8ff}}pre{{white-space:pre-wrap;word-break:break-word;color:#c9d1d9}}.row{{display:flex;justify-content:space-between;gap:12px;align-items:center}}
-</style></head><body><main><header><div><h1>Agent environment</h1><p>VM <code>{vm_id}</code></p></div><div><button id=\"wallet\">Connect Solana wallet</button><button id=\"refresh\">Refresh</button><p id=\"auth\" class=\"muted\">Read-only mode</p></div></header>
-<section class=\"panel\"><div class=\"row\"><div><strong id=\"overall\">Loading health…</strong><p id=\"checked\" class=\"muted\"></p></div><button id=\"update-all\" disabled>Update all</button></div><div id=\"components\" class=\"grid\"></div></section>
-<section class=\"panel\"><h2>Schedule</h2><p id=\"schedule\">Loading…</p><p id=\"policy\" class=\"muted\"></p><button id=\"authorize-policy\" disabled>Authorize daily updates</button></section>
-<section class=\"panel\"><h2>Update runs</h2><div id=\"runs\" class=\"muted\">Loading…</div></section>
+:root{color-scheme:dark;font:15px system-ui,sans-serif;background:#0d1117;color:#eef2f6}
+body{margin:0;padding:28px}main{max-width:1100px;margin:auto}header{display:flex;justify-content:space-between;gap:16px;align-items:start;margin-bottom:24px}
+h1{font-size:30px;margin:0 0 6px}p{color:#aab5c1;margin:6px 0}button{border:1px solid #3c84b7;background:#17344a;color:#e9f5ff;border-radius:8px;padding:9px 13px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}
+.panel{background:#151b23;border:1px solid #2b3542;border-radius:14px;padding:18px;margin:16px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.card{background:#1a212b;border:1px solid #2b3542;border-radius:12px;padding:15px}.card h3{margin:0 0 8px;font-size:16px}.muted{color:#9ca9b7;font-size:13px}
+.badge{display:inline-block;border-radius:999px;padding:4px 9px;font-size:12px;margin-bottom:8px}.healthy{background:#123d2a;color:#7ce2a5}.degraded,.unknown{background:#433514;color:#ffd37a}.unhealthy{background:#4b1e27;color:#ff9aa8}.updating{background:#233860;color:#a8c9ff}
+code{color:#a6d8ff}pre{white-space:pre-wrap;word-break:break-word;color:#c9d1d9}.row{display:flex;justify-content:space-between;gap:12px;align-items:center}.notice{border-color:#8b6a2b;background:#2a2415}
+</style></head><body><main><header><div><h1>Agent environment</h1><p>登入後查看環境資訊。</p></div><div><button id=\"wallet\">Connect / register MetaMask</button><button id=\"refresh\" hidden>Refresh</button><button id=\"logout\" hidden>Sign out</button><p id=\"auth\" class=\"muted\">請連接 MetaMask 登入。</p></div></header>
+<section class="panel notice" id="registration" hidden><h2>Register this VM</h2><p id="registration-status">尚未註冊。請連接 MetaMask，簽署註冊訊息。</p></section>
+<div id="private" hidden><section class=\"panel\"><div class=\"row\"><div><strong id=\"overall\"></strong><p id=\"checked\" class=\"muted\"></p></div><button id=\"update-all\" disabled>Update all</button></div><div id=\"components\" class=\"grid\"></div></section>
+<section class=\"panel\"><h2>Schedule</h2><p id=\"schedule\"></p><p id=\"policy\" class=\"muted\"></p><button id=\"authorize-policy\" disabled>Enable daily updates</button> <button id=\"disable-policy\" disabled>Disable daily updates</button></section>
+<section class=\"panel\"><h2>Update runs</h2><div id=\"runs\" class=\"muted\"></div></section>
+</div>
 <script>
-const state={{session:null,address:null,role:null,provider:null,components:[]}};
-const $=id=>document.getElementById(id);
-const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c]));
-function b58(bytes){{const a='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';let n=0n;for(const b of bytes)n=n*256n+BigInt(b);let out='';while(n){{const r=Number(n%58n);n/=58n;out=a[r]+out}}for(const b of bytes){{if(b)break;out='1'+out}}return out||'1'}}
-async function json(url,options={{}}){{const r=await fetch(url,{{...options,headers:{{'Content-Type':'application/json',...(options.headers||{{}})}}}});const data=await r.json();if(!r.ok)throw new Error(data.error||`HTTP ${{r.status}}`);return data}}
-function walletObject(){{return window.solana||window.phantom?.solana||null}}
-async function sign(message){{const p=state.provider;if(!p||!p.signMessage)throw new Error('wallet does not expose signMessage');const result=await p.signMessage(new TextEncoder().encode(message),'utf8');return b58(result.signature||result)}}
-async function connect(){{const p=walletObject();if(!p)throw new Error('No Solana browser wallet detected');state.provider=p;const connected=await p.connect();state.address=connected.publicKey?.toString()||p.publicKey?.toString();const c=await json(`/api/v1/auth/challenge?address=${{encodeURIComponent(state.address)}}`);let message=c.message,signature; if(p.signIn){{const out=await p.signIn({{domain:c.domain,address:state.address,statement:c.statement,uri:c.uri,version:'1',chainId:'solana:mainnet',nonce:c.nonce,issuedAt:c.issued_at,expirationTime:c.expiration_time}});message=new TextDecoder().decode(out.signedMessage);signature=b58(out.signature)}}else signature=await sign(message);const verified=await json('/api/v1/auth/verify',{{method:'POST',body:JSON.stringify({{challenge_id:c.challenge_id,address:state.address,message,signature}})}});state.session=verified.session;state.role=verified.role; $('auth').textContent=`${{verified.role}} · ${{state.address}}`; $('wallet').textContent='Wallet connected';await refresh()}}
-async function beginUpdate(ids){{if(!state.session)throw new Error('Connect a wallet first');const challenge=await json('/api/v1/control-challenges',{{method:'POST',headers:{{Authorization:`Bearer ${{state.session}}`}},body:JSON.stringify({{action:'update',component_ids:ids,target_versions:{{}}}})}});const signature=await sign(challenge.message);await json('/api/v1/update-runs',{{method:'POST',headers:{{Authorization:`Bearer ${{state.session}}`}},body:JSON.stringify({{challenge_id:challenge.challenge_id,message:challenge.message,signature}})}});await refresh()}}
-async function authorizePolicy(){{if(!state.session||state.role!=='admin')throw new Error('Admin wallet required');const expires=new Date(Date.now()+30*86400000).toISOString();const ids=state.components.filter(c=>c.update_supported).map(c=>c.id);const challenge=await json('/api/v1/policy-challenges',{{method:'POST',headers:{{Authorization:`Bearer ${{state.session}}`}},body:JSON.stringify({{components:ids,allow_restart:true,release_channel:'stable',expires_at:expires}})}});const signature=await sign(challenge.message);await json('/api/v1/policy',{{method:'PUT',headers:{{Authorization:`Bearer ${{state.session}}`}},body:JSON.stringify({{challenge_id:challenge.challenge_id,signature}})}});await refresh()}}
-async function refresh(){{try{{const h=await json('/api/v1/health');state.components=h.components||[];$('overall').textContent=`${{esc(h.status)}} · ${{esc(h.vm_id)}}`;$('overall').className=`badge ${{h.status}}`;$('checked').textContent=`Checked ${{esc(h.checked_at)}}`;$('components').innerHTML=state.components.map(c=>`<article class=\"card\"><span class=\"badge ${{esc(c.status)}}\">${{esc(c.status)}}</span><h3>${{esc(c.label)}}</h3><p class=\"muted\">${{esc(c.kind)}} · version ${{esc(c.version||'unknown')}}</p><p class=\"muted\">${{esc(c.detail||'')}}</p>${{c.update_supported?`<button class=\"update-one\" data-id=\"${{esc(c.id)}}\" ${{state.role==='operator'||state.role==='admin'?'':'disabled'}}>Update</button>`:''}}</article>`).join('');document.querySelectorAll('.update-one').forEach(b=>b.onclick=()=>beginUpdate([b.dataset.id]).catch(e=>alert(e.message)));const s=await json('/api/v1/schedule');$('schedule').textContent=`Daily at ${{esc(s.time)}} ${{esc(s.timezone)}} · persistent ${{esc(s.persistent)}}`;$('policy').textContent=esc(s.policy_reason);const runs=await json('/api/v1/runs');$('runs').innerHTML=(runs.runs||[]).map(r=>`<p><code>${{esc(r.id)}}</code> · ${{esc(r.trigger)}} · <strong>${{esc(r.status)}}</strong> · ${{esc(r.created_at)}}</p>`).join('')||'No runs yet';$('update-all').disabled=!['operator','admin'].includes(state.role)||!state.components.some(c=>c.update_supported);$('authorize-policy').disabled=state.role!=='admin'}}catch(e){{$('overall').textContent=e.message}}}}
- $('wallet').onclick=()=>connect().catch(e=>alert(e.message));$('refresh').onclick=()=>refresh();$('update-all').onclick=()=>beginUpdate(state.components.filter(c=>c.update_supported).map(c=>c.id)).catch(e=>alert(e.message));$('authorize-policy').onclick=()=>authorizePolicy().catch(e=>alert(e.message));refresh();
+const state = {session:null, address:null, role:null, provider:null, components:[], generation:0};
+const storageKey = 'ade.environment.session.v1';
+let sessionExpiryTimer;
+const $ = id => document.getElementById(id);
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function remember(value) {
+  try { value ? sessionStorage.setItem(storageKey, JSON.stringify(value)) : sessionStorage.removeItem(storageKey); }
+  catch (_) { /* Memory-only login remains usable when browser storage is disabled. */ }
+}
+async function json(url, options={}) {
+  const token = state.session;
+  const response = await fetch(url, {...options, headers:{'Content-Type':'application/json',
+    ...(token ? {Authorization:`Bearer ${token}`} : {}), ...(options.headers || {})}});
+  const data = await response.json();
+  if (!response.ok) {
+    if (response.status === 401 && token === state.session) resetWallet();
+    const error = new Error(data.error || `HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+async function revoke(token) {
+  if (!token) return;
+  const response = await fetch('/api/v1/auth/logout', {method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`}, body:'{}'});
+  if (!response.ok && response.status !== 401) throw new Error('Sign-out failed. Please retry.');
+}
+const walletProviders = [];
+window.addEventListener('eip6963:announceProvider', event => {
+  if (event.detail?.info?.rdns === 'io.metamask') {
+    walletProviders.push(event.detail.provider);
+    if (state.session && !state.provider) attachProvider(event.detail.provider);
+  }
+});
+window.dispatchEvent(new Event('eip6963:requestProvider'));
+function walletObject() {
+  return walletProviders[0] || window.ethereum?.providers?.find(p => p.isMetaMask && !p.isRabby)
+    || (window.ethereum?.isMetaMask && !window.ethereum?.isRabby ? window.ethereum : null);
+}
+function attachProvider(provider) {
+  if (state.provider === provider) return;
+  state.provider?.removeListener?.('accountsChanged', walletChanged);
+  state.provider?.removeListener?.('disconnect', walletChanged);
+  state.provider = provider;
+  provider.on?.('accountsChanged', walletChanged);
+  provider.on?.('disconnect', walletChanged);
+}
+function walletChanged(accounts) {
+  if (!state.session && !state.address) return;
+  if (Array.isArray(accounts) && accounts[0]?.toLowerCase() === state.address) return;
+  const token = state.session;
+  resetWallet();
+  revoke(token).catch(error => { $('auth').textContent = error.message; });
+}
+async function sign(message) {
+  const provider = state.provider;
+  if (!provider) throw new Error('Connect MetaMask first');
+  const accounts = await provider.request({method:'eth_accounts'});
+  if (accounts[0]?.toLowerCase() !== state.address) throw new Error('MetaMask account changed. Reconnect before signing.');
+  const hex = '0x' + Array.from(new TextEncoder().encode(message), b => b.toString(16).padStart(2,'0')).join('');
+  return provider.request({method:'personal_sign', params:[hex, state.address]});
+}
+function resetWallet() {
+  clearTimeout(sessionExpiryTimer);
+  state.generation++;
+  state.session = state.address = state.role = null;
+  state.components = [];
+  remember(null);
+  $('auth').textContent = '請連接 MetaMask 登入。';
+  for (const id of ['private','registration','refresh','logout']) $(id).hidden = true;
+  for (const id of ['registration-status','overall','checked','components','schedule','policy','runs']) $(id).textContent = '';
+  $('overall').className = '';
+  $('wallet').textContent = 'Connect / register MetaMask';
+  $('wallet').disabled = false;
+  for (const id of ['update-all','authorize-policy','disable-policy']) $(id).disabled = true;
+}
+function acceptSession(session) {
+  state.session = session.session;
+  state.address = session.address;
+  state.role = session.role;
+  remember(session);
+  clearTimeout(sessionExpiryTimer);
+  sessionExpiryTimer = setTimeout(resetWallet, Math.max(0, Date.parse(session.expires_at) - Date.now()));
+  $('auth').textContent = `${session.role} · ${session.address}`;
+}
+async function login() {
+  const address = state.address, generation = state.generation;
+  const challenge = await json('/api/v1/auth/challenge?address=' + encodeURIComponent(address) + '&origin=' + encodeURIComponent(location.origin));
+  const signature = await sign(challenge.message);
+  const verified = await json('/api/v1/auth/verify', {method:'POST', body:JSON.stringify({
+    challenge_id:challenge.challenge_id, address, message:challenge.message, signature})});
+  if (state.generation !== generation || state.address !== address) {
+    await revoke(verified.session);
+    throw new Error('Account changed. Please reconnect.');
+  }
+  acceptSession(verified);
+  await refresh();
+}
+async function connect() {
+  if (state.session) return;
+  resetWallet();
+  const provider = walletObject();
+  if (!provider) throw new Error('MetaMask extension not detected. Install or enable MetaMask, then reload this page.');
+  attachProvider(provider);
+  const generation = state.generation;
+  const accounts = await provider.request({method:'eth_requestAccounts'});
+  if (state.generation !== generation) return;
+  state.address = accounts[0]?.toLowerCase();
+  if (!state.address) throw new Error('MetaMask did not return an account');
+  let registration;
+  try { registration = await json('/api/v1/registration/challenge?address=' + encodeURIComponent(state.address)); }
+  catch (error) { if (error.status !== 409) throw error; }
+  if (registration) {
+    $('registration').hidden = false;
+    $('registration-status').textContent = '請在 wallet 中確認註冊簽章。';
+    const signature = await sign(registration.message);
+    await json('/api/v1/registration', {method:'POST', body:JSON.stringify({
+      challenge_id:registration.challenge_id, address:state.address, message:registration.message, signature})});
+  }
+  if (state.generation !== generation) return;
+  await login();
+}
+async function beginUpdate(ids) {
+  if (!state.session) throw new Error('Connect a wallet first');
+  await json('/api/v1/update-runs', {method:'POST', body:JSON.stringify({action:'update', component_ids:ids, target_versions:{}})});
+  await refresh();
+}
+async function setPolicy(enabled) {
+  if (!state.session || state.role !== 'admin') throw new Error('Admin wallet required');
+  const components = state.components.filter(component => component.update_supported).map(component => component.id);
+  await json('/api/v1/policy', {method:'PUT', body:JSON.stringify({enabled, components, allow_restart:true, release_channel:'stable'})});
+  await refresh();
+}
+async function refresh() {
+  if (!state.session) { resetWallet(); return; }
+  const token = state.session;
+  const [health, schedule, runs] = await Promise.all([json('/api/v1/health'), json('/api/v1/schedule'), json('/api/v1/runs')]);
+  if (token !== state.session) return;
+  $('private').hidden = false;
+  $('registration').hidden = true;
+  $('refresh').hidden = $('logout').hidden = false;
+  $('wallet').textContent = 'Wallet connected';
+  $('wallet').disabled = true;
+  state.components = health.components || [];
+  $('overall').textContent = `${health.status} · ${health.vm_id}`;
+  $('overall').className = `badge ${health.status}`;
+  $('checked').textContent = `Checked ${health.checked_at}`;
+  $('components').innerHTML = state.components.map(c => `<article class="card"><span class="badge ${esc(c.status)}">${esc(c.status)}</span><h3>${esc(c.label)}</h3><p class="muted">${esc(c.kind)} · version ${esc(c.version || 'unknown')}</p><p class="muted">${esc(c.detail || '')}</p>${c.update_supported ? `<button class="update-one" data-id="${esc(c.id)}" ${['operator','admin'].includes(state.role) ? '' : 'disabled'}>Update</button>` : ''}</article>`).join('');
+  document.querySelectorAll('.update-one').forEach(button => button.onclick = () => beginUpdate([button.dataset.id]).catch(showError));
+  $('schedule').textContent = `Daily at ${schedule.schedule.time} ${schedule.schedule.timezone} · persistent ${schedule.schedule.persistent}`;
+  $('policy').textContent = schedule.policy_valid ? '已啟用每日更新，持續執行直到停用。' : schedule.policy_reason;
+  $('runs').innerHTML = (runs.runs || []).map(run => `<p><code>${esc(run.id)}</code> · ${esc(run.trigger)} · <strong>${esc(run.status)}</strong> · ${esc(run.created_at)}</p>`).join('') || 'No runs yet';
+  $('update-all').disabled = !['operator','admin'].includes(state.role) || !state.components.some(c => c.update_supported);
+  $('authorize-policy').disabled = state.role !== 'admin' || !state.components.some(c => c.update_supported);
+  $('disable-policy').disabled = state.role !== 'admin' || !schedule.policy_valid;
+}
+function showError(error) { $('auth').textContent = error.message; }
+async function restoreSession() {
+  let saved;
+  try { saved = JSON.parse(sessionStorage.getItem(storageKey)); } catch (_) {}
+  if (!saved?.session || !(Date.parse(saved.expires_at) > Date.now())) { resetWallet(); return; }
+  const generation = state.generation;
+  state.session = saved.session;
+  try {
+    const session = await json('/api/v1/auth/session');
+    if (state.generation !== generation) return;
+    const provider = walletObject();
+    if (provider) {
+      attachProvider(provider);
+      const accounts = await provider.request({method:'eth_accounts'});
+      if (state.generation !== generation) return;
+      if (accounts[0]?.toLowerCase() !== session.address) { walletChanged(); return; }
+    }
+    acceptSession({...session, session:saved.session});
+    await refresh();
+  } catch (error) {
+    if (state.generation === generation) {
+      // A temporary server/network failure does not invalidate the credential.
+      // Keep it for retry without exposing cached environment information.
+      $('refresh').hidden = false;
+      showError(error);
+    }
+  }
+}
+$('wallet').onclick = () => connect().catch(showError);
+$('refresh').onclick = () => (state.role ? refresh() : restoreSession()).catch(showError);
+$('logout').onclick = async () => {
+  const token = state.session;
+  try { await revoke(token); if (state.session === token) resetWallet(); } catch (error) { showError(error); }
+};
+$('update-all').onclick = () => beginUpdate(state.components.filter(c => c.update_supported).map(c => c.id)).catch(showError);
+$('authorize-policy').onclick = () => setPolicy(true).catch(showError);
+$('disable-policy').onclick = () => setPolicy(false).catch(showError);
+restoreSession();
 </script></main></body></html>"""
 
 
 def _policy_public(policy: Mapping[str, Any] | None, config: EnvironmentConfig) -> dict[str, Any]:
     if not policy:
-        return {"enrolled": False, "valid": False, "reason": "no signed update policy is enrolled"}
+        return {"enrolled": False, "enabled": False, "valid": False, "reason": "daily updates are not enabled"}
     valid, reason = verify_policy(config, policy)
     return {
         "enrolled": True,
+        "enabled": policy.get("enabled", True),
         "valid": valid,
         "reason": reason,
         "policy_id": policy.get("policy_id"),
@@ -1063,9 +1338,7 @@ class EnvironmentHTTPServer:
         self.config = config
         self.store = RunStore(config.state_root)
         self.coordinator = UpdateCoordinator(config, self.store)
-        self.sessions: dict[str, dict[str, Any]] = {}
-        self.auth_challenges: dict[str, dict[str, Any]] = {}
-        self.control_challenges: dict[str, dict[str, Any]] = {}
+        self.registration_challenges: dict[str, dict[str, Any]] = {}
         self.auth_failures: dict[str, list[float]] = {}
         self.lock = threading.RLock()
         self.httpd: Any = None
@@ -1074,16 +1347,8 @@ class EnvironmentHTTPServer:
         now = utc_now()
         cutoff = time.monotonic() - 300
         with self.lock:
-            self.sessions = {
-                key: value for key, value in self.sessions.items()
-                if parse_timestamp(value["expires_at"]) > now
-            }
-            self.auth_challenges = {
-                key: value for key, value in self.auth_challenges.items()
-                if parse_timestamp(value["expires_at"]) > now
-            }
-            self.control_challenges = {
-                key: value for key, value in self.control_challenges.items()
+            self.registration_challenges = {
+                key: value for key, value in self.registration_challenges.items()
                 if parse_timestamp(value["expires_at"]) > now
             }
             self.auth_failures = {
@@ -1103,133 +1368,140 @@ class EnvironmentHTTPServer:
             values = self.auth_failures.setdefault(address, [])
             values.append(time.monotonic())
 
-    def session(self, handler: Any, minimum_role: str = "viewer") -> dict[str, Any]:
+    def _authority(self, operation: str, **payload: Any) -> dict[str, Any]:
+        helper = self.config.authorization_trigger
+        if not helper.is_file() or not os.access(helper, os.X_OK):
+            raise EnvironmentError("privileged authorization helper is unavailable")
+        result = subprocess.run(
+            ["/usr/bin/sudo", "-n", str(helper)],
+            input=json.dumps({**payload, "operation": operation}),
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        if result.returncode != 0:
+            raise EnvironmentError("privileged authorization helper failed")
+        try:
+            value = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise EnvironmentError("invalid authorization helper response") from exc
+        if not isinstance(value, dict):
+            raise EnvironmentError("invalid authorization helper response")
+        if "error" in value:
+            raise EnvironmentError(value["error"])
+        return value
+
+    @staticmethod
+    def _token(handler: Any) -> str:
         authorization = handler.headers.get("Authorization", "")
         if not authorization.startswith("Bearer "):
             raise EnvironmentError("wallet session required")
-        token = authorization.removeprefix("Bearer ").strip()
-        self._cleanup()
-        with self.lock:
-            value = self.sessions.get(token)
-        if value is None:
-            raise EnvironmentError("wallet session expired")
+        return authorization.removeprefix("Bearer ").strip()
+
+    def session(self, handler: Any, minimum_role: str = "viewer") -> dict[str, Any]:
+        value = self._authority("session", token=self._token(handler))
         rank = {"viewer": 0, "operator": 1, "admin": 2}
         if rank[value["role"]] < rank[minimum_role]:
             raise EnvironmentError(f"wallet role {minimum_role} required")
         return value
 
-    def _challenge_message(self, address: str, challenge: Mapping[str, Any]) -> str:
-        domain = challenge["domain"]
-        return (
-            f"{domain} wants you to sign in with your Solana account:\n{address}\n\n"
-            f"{challenge['statement']}\n\n"
-            f"URI: {challenge['uri']}\n"
-            "Version: 1\n"
-            "Chain ID: solana:mainnet\n"
-            f"Nonce: {challenge['nonce']}\n"
-            f"Issued At: {challenge['issued_at']}\n"
-            f"Expiration Time: {challenge['expires_at']}"
-        )
+    def registration_status(self) -> dict[str, Any]:
+        return {
+            "required": not bool(self.config.authorized_wallets),
+            "vm_id": self.config.vm_id,
+            "role": "admin" if not self.config.authorized_wallets else None,
+        }
 
-    def create_auth_challenge(self, address: str) -> dict[str, Any]:
-        if len(base58_decode(address)) != 32:
-            raise EnvironmentError("wallet address must be a Solana public key")
+    def create_registration_challenge(self, address: str) -> dict[str, Any]:
+        self._cleanup()
+        if self.config.authorized_wallets:
+            raise EnvironmentError("registration is already complete")
+        address = normalize_wallet_address(address)
         issued_at = iso_now()
         expires_at = (utc_now() + dt.timedelta(minutes=10)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         challenge_id = str(uuid.uuid4())
+        message = registration_message(
+            self.config.vm_id,
+            address,
+            secrets.token_urlsafe(24),
+            issued_at,
+            expires_at,
+        )
         challenge = {
             "challenge_id": challenge_id,
             "address": address,
-            "domain": self.config.public_origin.split("://", 1)[-1].split("/", 1)[0],
-            "uri": self.config.public_origin,
-            "statement": f"Sign in to manage VM {self.config.vm_id}.",
-            "nonce": secrets.token_urlsafe(24),
-            "issued_at": issued_at,
-            "expires_at": expires_at,
-        }
-        challenge["expiration_time"] = expires_at
-        challenge["message"] = self._challenge_message(address, challenge)
-        with self.lock:
-            self.auth_challenges[challenge_id] = challenge
-        return challenge
-
-    def verify_auth(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        challenge_id = payload.get("challenge_id")
-        address = payload.get("address")
-        message = payload.get("message")
-        signature = payload.get("signature")
-        if not all(isinstance(item, str) for item in (challenge_id, address, message, signature)):
-            raise EnvironmentError("challenge_id, address, message, and signature are required")
-        self._cleanup()
-        with self.lock:
-            challenge = self.auth_challenges.get(challenge_id)
-        exact_message = challenge is not None and secrets.compare_digest(challenge["message"], message)
-        siws_message = challenge is not None and self._siws_message_matches(challenge, address, message)
-        if challenge is None or challenge["address"] != address or not (exact_message or siws_message):
-            raise EnvironmentError("authentication challenge is invalid")
-        if not verify_solana_signature(address, message.encode("utf-8"), signature):
-            raise EnvironmentError("wallet signature is invalid")
-        role = wallet_role(self.config, address)
-        if role is None:
-            raise EnvironmentError("wallet is not enrolled for this VM")
-        token = secrets.token_urlsafe(32)
-        expires_at = (utc_now() + dt.timedelta(hours=12)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        session = {"address": address, "role": role, "expires_at": expires_at}
-        with self.lock:
-            self.sessions[token] = session
-            self.auth_challenges.pop(challenge_id, None)
-        return {"session": token, "role": role, "address": address, "expires_at": expires_at}
-
-    def _siws_message_matches(self, challenge: Mapping[str, Any], address: str, message: str) -> bool:
-        required = (
-            f"{challenge['domain']} wants you to sign in with your Solana account:\n{address}",
-            f"URI: {challenge['uri']}",
-            f"Nonce: {challenge['nonce']}",
-            f"Issued At: {challenge['issued_at']}",
-            f"Expiration Time: {challenge['expires_at']}",
-        )
-        return all(item in message for item in required)
-
-    def create_control_challenge(self, handler: Any, payload: Mapping[str, Any]) -> dict[str, Any]:
-        session = self.session(handler, "operator")
-        action = payload.get("action")
-        component_ids = payload.get("component_ids")
-        target_versions = payload.get("target_versions", {})
-        if action not in {"update", "restart"}:
-            raise EnvironmentError("unsupported control action")
-        if not isinstance(component_ids, list) or not component_ids or not all(isinstance(item, str) for item in component_ids):
-            raise EnvironmentError("component_ids must be a non-empty list")
-        known = self.config.component_map()
-        for item in component_ids:
-            component = known.get(item)
-            if component is None or not component.enabled:
-                raise EnvironmentError("control request contains an unknown component")
-            if action == "update" and component.update_command is None:
-                raise EnvironmentError(f"component has no update command: {item}")
-            if action == "restart" and component.restart_command is None:
-                raise EnvironmentError(f"component has no restart command: {item}")
-        target_versions = validate_target_versions(self.config, component_ids, target_versions)
-        issued_at = iso_now()
-        expires_at = (utc_now() + dt.timedelta(minutes=2)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        challenge_id = str(uuid.uuid4())
-        message = control_message(
-            self.config.vm_id, action, component_ids, target_versions,
-            secrets.token_urlsafe(24), issued_at, expires_at,
-        )
-        challenge = {
-            "challenge_id": challenge_id,
-            "address": session["address"],
-            "role": session["role"],
-            "action": action,
-            "component_ids": list(component_ids),
-            "target_versions": dict(target_versions),
+            "role": "admin",
             "message": message,
             "issued_at": issued_at,
             "expires_at": expires_at,
         }
         with self.lock:
-            self.control_challenges[challenge_id] = challenge
+            if self.config.authorized_wallets:
+                raise EnvironmentError("registration is already complete")
+            self.registration_challenges[challenge_id] = challenge
+            while len(self.registration_challenges) > 32:
+                self.registration_challenges.pop(next(iter(self.registration_challenges)))
         return challenge
+
+    def _trigger_registration(self, address: str, message: str, signature: str) -> dict[str, Any]:
+        trigger = self.config.registration_trigger
+        if not trigger.is_file() or not os.access(trigger, os.X_OK):
+            raise EnvironmentError("wallet registration helper is unavailable")
+        request = json.dumps(
+            {"address": address, "message": message, "signature": signature},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        result = subprocess.run(
+            ["/usr/bin/sudo", "-n", str(trigger)],
+            input=request,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = _redact((result.stderr or result.stdout).strip() or "registration helper failed")
+            raise EnvironmentError("wallet registration failed: " + detail)
+        try:
+            response = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise EnvironmentError("wallet registration returned an invalid response") from exc
+        if not isinstance(response, Mapping) or response.get("registered") is not True:
+            raise EnvironmentError("wallet registration was not confirmed")
+        return dict(response)
+
+    def _reload_config(self) -> None:
+        config = EnvironmentConfig.load(self.config.path)
+        with self.lock:
+            self.config = config
+            self.coordinator = UpdateCoordinator(config, self.store)
+
+    def register_wallet(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        address = normalize_wallet_address(payload.get("address"))
+        challenge_id = payload.get("challenge_id")
+        message = payload.get("message")
+        signature = payload.get("signature")
+        if not all(isinstance(item, str) for item in (address, challenge_id, message, signature)):
+            raise EnvironmentError("address, challenge_id, message, and signature are required")
+        self._cleanup()
+        with self.lock:
+            challenge = self.registration_challenges.get(challenge_id)
+        if challenge is None or challenge["address"] != address or not secrets.compare_digest(challenge["message"], message):
+            raise EnvironmentError("registration challenge is invalid")
+        valid, reason = verify_registration_request(self.config, address, message, signature)
+        if not valid:
+            raise EnvironmentError(reason)
+        self._trigger_registration(address, message, signature)
+        self._reload_config()
+        with self.lock:
+            self.registration_challenges.pop(challenge_id, None)
+        return {"registered": True, "address": address, "role": "admin", "login_required": True}
+
+    def create_auth_challenge(self, address: str, origin: str | None = None) -> dict[str, Any]:
+        return self._authority("challenge", address=address, origin=origin)
+
+    def verify_auth(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return self._authority("login", **{key: payload.get(key) for key in
+                                         ("challenge_id", "address", "message", "signature")})
 
     def _trigger_manual(self, run_id: str) -> None:
         if not self.config.manual_trigger.is_file() or not os.access(self.config.manual_trigger, os.X_OK):
@@ -1243,108 +1515,49 @@ class EnvironmentHTTPServer:
         )
 
     def start_update(self, handler: Any, payload: Mapping[str, Any]) -> dict[str, Any]:
-        session = self.session(handler, "operator")
-        challenge_id = payload.get("challenge_id")
-        message = payload.get("message")
-        signature = payload.get("signature")
-        if not all(isinstance(item, str) for item in (challenge_id, message, signature)):
-            raise EnvironmentError("challenge_id, message, and signature are required")
-        self._cleanup()
-        with self.lock:
-            challenge = self.control_challenges.get(challenge_id)
-        if challenge is None or challenge["address"] != session["address"] or not secrets.compare_digest(challenge["message"], message):
-            raise EnvironmentError("control challenge is invalid")
-        if not verify_solana_signature(session["address"], message.encode("utf-8"), signature):
-            raise EnvironmentError("control signature is invalid")
-        run = self.coordinator.create_run(
-            "manual",
-            challenge["component_ids"],
-            session["address"],
-            challenge["action"],
-            challenge["target_versions"],
-            {
-                "address": session["address"],
-                "message": challenge["message"],
-                "signature": signature,
-            },
-        )
+        run = self._authority("authorize_run", token=self._token(handler),
+                              action=payload.get("action", "update"),
+                              component_ids=payload.get("component_ids"),
+                              target_versions=payload.get("target_versions", {}))
         try:
             self._trigger_manual(run["id"])
         except (EnvironmentError, OSError, subprocess.SubprocessError) as exc:
             run = self.store.update(run["id"], status="failed", finished_at=iso_now(), error=_redact(str(exc)))
             raise EnvironmentError(f"update run was queued but could not start: {run['error']}") from exc
-        with self.lock:
-            self.control_challenges.pop(challenge_id, None)
         return run
 
-    def create_policy_challenge(self, handler: Any, policy: Mapping[str, Any]) -> dict[str, Any]:
-        session = self.session(handler, "admin")
-        if policy.get("vm_id", self.config.vm_id) != self.config.vm_id:
-            raise EnvironmentError("policy VM identity does not match")
-        components = policy.get("components")
-        if not isinstance(components, list) or not components:
-            raise EnvironmentError("policy components are required")
-        if not all(isinstance(item, str) for item in components):
-            raise EnvironmentError("policy components must be strings")
-        known = {component.id for component in self.config.components if component.enabled}
-        if not set(components).issubset(known):
-            raise EnvironmentError("policy contains a component outside the VM allowlist")
-        candidate = {
-            "policy_id": str(policy.get("policy_id") or str(uuid.uuid4())),
-            "vm_id": self.config.vm_id,
-            "components": sorted(set(components)),
-            "allow_restart": bool(policy.get("allow_restart", True)),
-            "release_channel": policy.get("release_channel", "stable"),
-            "expires_at": policy.get("expires_at"),
-            "target_versions": policy.get("target_versions", {}),
-        }
-        if candidate["release_channel"] != "stable":
-            raise EnvironmentError("only stable release channel is allowed")
-        candidate["target_versions"] = validate_target_versions(self.config, candidate["components"], candidate["target_versions"])
-        parse_timestamp(str(candidate["expires_at"]))
-        challenge_id = str(uuid.uuid4())
-        challenge = {
-            "challenge_id": challenge_id,
-            "address": session["address"],
-            "policy": candidate,
-            "message": policy_message(candidate),
-            "issued_at": iso_now(),
-            "expires_at": (utc_now() + dt.timedelta(minutes=2)).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-        }
-        with self.lock:
-            self.control_challenges[challenge_id] = challenge
-        return challenge
-
     def save_policy(self, handler: Any, payload: Mapping[str, Any]) -> dict[str, Any]:
-        session = self.session(handler, "admin")
-        challenge_id = payload.get("challenge_id")
-        signature = payload.get("signature")
-        if not isinstance(challenge_id, str) or not isinstance(signature, str):
-            raise EnvironmentError("challenge_id and signature are required")
-        self._cleanup()
-        with self.lock:
-            challenge = self.control_challenges.get(challenge_id)
-        if challenge is None or challenge.get("address") != session["address"] or not challenge.get("policy"):
-            raise EnvironmentError("policy challenge is invalid")
-        if not verify_solana_signature(session["address"], challenge["message"].encode(), signature):
-            raise EnvironmentError("policy signature is invalid")
-        policy = {**challenge["policy"], "signer": session["address"], "signature": signature}
-        valid, reason = verify_policy(self.config, policy)
-        if not valid:
-            raise EnvironmentError(reason)
-        self.store.write_policy(policy)
-        with self.lock:
-            self.control_challenges.pop(challenge_id, None)
-        return _policy_public(policy, self.config)
+        fields = {key: payload[key] for key in
+                  ("enabled", "components", "target_versions", "allow_restart", "release_channel", "expires_at")
+                  if key in payload}
+        return self._authority("save_policy", token=self._token(handler), **fields)
 
     def handle(self, handler: Any) -> tuple[int, Any]:
         parsed = urllib.parse.urlparse(handler.path)
         path = parsed.path
         method = handler.command
+        public_routes = {
+            ("GET", "/"),
+            ("GET", "/api/v1/auth/challenge"),
+            ("POST", "/api/v1/auth/verify"),
+            ("GET", "/api/v1/registration/challenge"),
+            ("POST", "/api/v1/registration"),
+        }
+        if (method, path) not in public_routes:
+            self.session(handler)
+        if method == "POST" and path == "/api/v1/auth/logout":
+            return 200, self._authority("logout", token=self._token(handler))
+        if method == "GET" and path == "/api/v1/auth/session":
+            return 200, self.session(handler)
         if method == "GET" and path == "/":
             return 200, ("text/html; charset=utf-8", dashboard_html(self.config))
         if method == "GET" and path == "/healthz":
-            return 200, {"status": "ok", "service": "agent-environment", "vm_id": self.config.vm_id}
+            return 200, {
+                "status": "ok",
+                "service": "agent-environment",
+                "vm_id": self.config.vm_id,
+                "registration_required": not bool(self.config.authorized_wallets),
+            }
         if method == "GET" and path == "/api/v1/health":
             return 200, environment_health(self.config)
         if method == "GET" and path == "/api/v1/components":
@@ -1352,25 +1565,28 @@ class EnvironmentHTTPServer:
         if method == "GET" and path == "/api/v1/runs":
             return 200, {"runs": [_run_public(run, self.config) for run in self.store.list()]}
         if method == "GET" and path == "/api/v1/schedule":
-            policy = self.store.read_policy()
+            policy = read_environment_policy(self.config)
             public = self.config.public_config()
             valid, reason = verify_policy(self.config, policy)
             public["policy_valid"] = valid
             public["policy_reason"] = reason
             return 200, public
         if method == "GET" and path == "/api/v1/policy":
-            return 200, _policy_public(self.store.read_policy(), self.config)
+            return 200, _policy_public(read_environment_policy(self.config), self.config)
+        if method == "GET" and path == "/api/v1/registration/status":
+            return 200, self.registration_status()
+        if method == "GET" and path == "/api/v1/registration/challenge":
+            query = urllib.parse.parse_qs(parsed.query)
+            return 200, self.create_registration_challenge(query.get("address", [""])[0])
+        if method == "POST" and path == "/api/v1/registration":
+            return 200, self.register_wallet(handler.json_payload())
         if method == "GET" and path == "/api/v1/auth/challenge":
             query = urllib.parse.parse_qs(parsed.query)
-            return 200, self.create_auth_challenge(query.get("address", [""])[0])
+            return 200, self.create_auth_challenge(query.get("address", [""])[0], query.get("origin", [None])[0])
         if method == "POST" and path == "/api/v1/auth/verify":
             return 200, self.verify_auth(handler.json_payload())
-        if method == "POST" and path == "/api/v1/control-challenges":
-            return 200, self.create_control_challenge(handler, handler.json_payload())
         if method == "POST" and path == "/api/v1/update-runs":
             return 202, self.start_update(handler, handler.json_payload())
-        if method == "POST" and path == "/api/v1/policy-challenges":
-            return 200, self.create_policy_challenge(handler, handler.json_payload())
         if method == "PUT" and path == "/api/v1/policy":
             return 200, self.save_policy(handler, handler.json_payload())
         raise EnvironmentError("route not found")
@@ -1383,6 +1599,8 @@ class EnvironmentHTTPServer:
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
+            server_version = ""
+            sys_version = ""
 
             def json_payload(self) -> Mapping[str, Any]:
                 try:
@@ -1415,7 +1633,7 @@ class EnvironmentHTTPServer:
                 else:
                     content_type = "application/json; charset=utf-8"
                     body = json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")
-                self.send_response(status)
+                self.send_response_only(status)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "no-store")
@@ -1444,6 +1662,8 @@ class EnvironmentHTTPServer:
                         app.note_auth_failure(self.client_address[0])
                     message = str(exc)
                     status = 404 if message == "route not found" else 400
+                    if "registration is already complete" in message:
+                        status = 409
                     if "role" in message or "session" in message or "enrolled" in message:
                         status = 401 if "session" in message or "enrolled" in message else 403
                     self.send_value(status, {"error": message})
@@ -1463,7 +1683,7 @@ class EnvironmentHTTPServer:
                 if not self.origin_allowed():
                     self.send_value(403, {"error": "origin is not allowed"})
                     return
-                self.send_response(204)
+                self.send_response_only(204)
                 self.send_header("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS")
                 self.send_header("Access-Control-Allow-Headers", "Content-Type,Authorization")
                 self.send_header("Access-Control-Max-Age", "600")
@@ -1485,6 +1705,11 @@ class EnvironmentHTTPServer:
             httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
         self.httpd = httpd
         print(f"agent-environment listening on {self.config.public_origin}", flush=True)
+        if not self.config.authorized_wallets:
+            print(
+                f"registration required: connect a MetaMask at {self.config.public_origin}/",
+                flush=True,
+            )
         try:
             httpd.serve_forever()
         finally:

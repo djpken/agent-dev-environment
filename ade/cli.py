@@ -238,6 +238,11 @@ def main():
     env_enroll.add_argument("--config", type=Path, default=environment.DEFAULT_CONFIG_PATH)
     env_enroll.add_argument("--address", required=True)
     env_enroll.add_argument("--role", choices=environment.ROLES, default="admin")
+    env_enroll_signed = env_sub.add_parser("enroll-signed")
+    env_enroll_signed.add_argument("--config", type=Path, default=environment.DEFAULT_CONFIG_PATH)
+    env_enroll_signed.add_argument("--request-json", required=True)
+    env_authorize = env_sub.add_parser("authorize")
+    env_authorize.add_argument("--config", type=Path, default=environment.DEFAULT_CONFIG_PATH)
     args = parser.parse_args()
     try:
         if args.operation in ("plan", "apply"):
@@ -270,6 +275,20 @@ def main():
             raise core.Error("unknown schedule operation: " + args.schedule_operation)
         elif args.operation == "environment":
             config = environment.EnvironmentConfig.load(args.config)
+            if args.environment_operation == "authorize":
+                from .environment_auth import EnvironmentAuthority
+
+                if os.geteuid() != 0 or config.path.stat().st_uid != 0 or config.path.stat().st_mode & 0o022:
+                    raise core.Error("environment authorization requires root and a root-owned config")
+                try:
+                    raw_request = sys.stdin.read(65537)
+                    if not raw_request or len(raw_request) > 65536:
+                        raise environment.EnvironmentError("authorization request is empty or too large")
+                    request = json.loads(raw_request)
+                    output(EnvironmentAuthority(config).dispatch(request))
+                except (environment.EnvironmentError, json.JSONDecodeError) as exc:
+                    output({"error": str(exc)})
+                return 0
             if args.environment_operation == "service":
                 if args.host:
                     config = environment.EnvironmentConfig(
@@ -295,7 +314,7 @@ def main():
                     "config": config.public_config(),
                     "health": environment.environment_health(config),
                     "runs": store.list(),
-                    "policy": environment._policy_public(store.read_policy(), config),
+                    "policy": environment._policy_public(environment.read_environment_policy(config), config),
                 })
                 return 0
             if args.environment_operation == "enroll":
@@ -304,12 +323,11 @@ def main():
                 raw = environment._read_json(config.path, None)
                 if not isinstance(raw, dict):
                     raise core.Error("environment config must be a JSON object")
-                if len(environment.base58_decode(args.address)) != 32:
-                    raise core.Error("wallet address must be a Solana public key")
+                args.address = environment.normalize_wallet_address(args.address)
                 wallets = raw.setdefault("wallets", {}).setdefault("authorized", [])
                 if not isinstance(wallets, list):
                     raise core.Error("wallets.authorized must be a list")
-                wallets = [item for item in wallets if not isinstance(item, dict) or item.get("address") != args.address]
+                wallets = [item for item in wallets if not isinstance(item, dict) or str(item.get("address", "")).lower() != args.address]
                 wallets.append({"address": args.address, "role": args.role})
                 raw["wallets"]["authorized"] = wallets
                 mode = config.path.stat().st_mode & 0o777
@@ -318,6 +336,24 @@ def main():
                 os.chown(config.path, owner.st_uid, owner.st_gid)
                 output({"address": args.address, "role": args.role, "config": str(config.path)})
                 return 0
+            if args.environment_operation == "enroll-signed":
+                if os.geteuid() != 0:
+                    raise core.Error("signed wallet enrollment must run as root")
+                try:
+                    request = json.loads(args.request_json)
+                except json.JSONDecodeError as exc:
+                    raise core.Error("signed enrollment request must be valid JSON") from exc
+                if not isinstance(request, dict) or set(request) != {"address", "message", "signature"}:
+                    raise core.Error("signed enrollment request fields are invalid")
+                if not all(isinstance(request.get(key), str) for key in ("address", "message", "signature")):
+                    raise core.Error("signed enrollment request values are invalid")
+                output(environment.enroll_signed_wallet(
+                    config,
+                    request["address"],
+                    request["message"],
+                    request["signature"],
+                ))
+                return 0
             if args.environment_operation == "update":
                 coordinator = environment.UpdateCoordinator(config, store)
                 run = store.get(args.run_id) if args.run_id else coordinator.create_run(
@@ -325,7 +361,7 @@ def main():
                 )
                 if run is None:
                     raise core.Error("update run not found: " + args.run_id)
-                result = coordinator.execute(run["id"])
+                result = coordinator.execute(run["id"], expected_trigger=args.trigger)
                 output(result)
                 return 0 if result["status"] in {"completed", "blocked"} else 1
             raise core.Error("unknown environment operation: " + args.environment_operation)
@@ -343,7 +379,7 @@ def main():
             core.check(provider["transport"] != "cli", "use the typed review command for OCR")
             command = core.argv(provider, release)
             os.execvpe(command[0], command, core.clean_env(provider))
-    except (core.Error, sync.SyncError, scheduler.ScheduleError, OSError, subprocess.SubprocessError,
+    except (core.Error, environment.EnvironmentError, sync.SyncError, scheduler.ScheduleError, OSError, subprocess.SubprocessError,
             KeyError, TypeError, json.JSONDecodeError) as exc:
         print("ade: " + str(exc), file=sys.stderr)
         return 1

@@ -78,7 +78,7 @@ if [[ ! -f /etc/ade/tls/agent-environment.crt || ! -f /etc/ade/tls/agent-environ
   temporary_key=$(mktemp /tmp/agent-environment.key.XXXXXX)
   temporary_cert=$(mktemp /tmp/agent-environment.crt.XXXXXX)
   trap 'rm -f -- "$temporary_env" "$temporary_config" "$temporary_key" "$temporary_cert"' EXIT
-  openssl req -x509 -newkey ed25519 -nodes -days 825 \
+  openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 365 \
     -keyout "$temporary_key" -out "$temporary_cert" \
     -subj "/CN=$public_host" -addext "subjectAltName=$san" >/dev/null 2>&1
   install -o root -g orca -m 0640 "$temporary_key" /etc/ade/tls/agent-environment.key
@@ -95,6 +95,12 @@ install -o root -g root -m 0755 \
 install -o root -g root -m 0755 \
   "$source_root/deploy/agent-environment/agent-environment-trigger" \
   /usr/local/sbin/agent-environment-trigger
+install -o root -g root -m 0755 \
+  "$source_root/deploy/agent-environment/agent-environment-enroll" \
+  /usr/local/sbin/agent-environment-enroll
+install -o root -g root -m 0755 \
+  "$source_root/deploy/agent-environment/agent-environment-authorize" \
+  /usr/local/sbin/agent-environment-authorize
 install -o root -g root -m 0755 \
   "$source_root/deploy/agent-environment/codex-headless-update" \
   /usr/local/sbin/codex-headless-update

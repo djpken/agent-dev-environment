@@ -8,6 +8,7 @@
     "port": 6790
   },
   "public_origin": "https://__PUBLIC_HOST__:6790",
+  "allow_http": false,
   "tls": {
     "cert": "/etc/ade/tls/agent-environment.crt",
     "key": "/etc/ade/tls/agent-environment.key"
@@ -28,6 +29,7 @@
     "base_url": "http://__PUBLIC_HOST__:80"
   },
   "manual_trigger": "/usr/local/sbin/agent-environment-trigger",
+  "registration_trigger": "/usr/local/sbin/agent-environment-enroll",
   "components": [
     {
       "id": "orca",

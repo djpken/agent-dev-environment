@@ -33,19 +33,27 @@ _Avoid_: Web artifact publisher、public content page、guest path
 _Avoid_: arbitrary process、MCP config、systemd unit
 
 **Environment management surface**：
-Agent environment service 提供的 live dashboard 與 machine-readable API；health 可公開讀取，控制操作需使用 Wallet-signed control request。
+Agent environment service 提供的 live dashboard 與 machine-readable API；使用者透過 Wallet-authorized session，依身份權限查看環境與執行控制操作。
 _Avoid_: Web artifact、public content page
 
+**Wallet-authorized session**：
+使用者以 browser wallet 確認身份與授權範圍後，對指定 VM 建立的限時操作資格；有效期間內依身份權限執行操作，無須逐次要求 wallet 簽署。
+_Avoid_: wallet connection、on-chain approval、unbounded delegation
+
 **Wallet-signed control request**：
-由使用者的 browser wallet 簽署、授權對指定 VM 或 managed component 執行一次控制操作的請求。
+既有逐次授權模式中，由使用者的 browser wallet 簽署、授權對指定 VM 或 managed component 執行一次控制操作的請求。
 _Avoid_: private key on VM、unsigned admin command
 
-**Solana wallet identity**：
-由 Solana public address 表示、可在指定 VM 執行受控操作的授權身份；其 private key 永遠留在 browser wallet。
+**Ethereum wallet identity**：
+由 Ethereum public address 表示、可在指定 VM 執行受控操作的授權身份；其 private key 永遠留在 browser wallet。
 _Avoid_: wallet balance、on-chain transaction、private key on VM
 
+**Wallet registration**：
+當 VM 尚未有授權身份時，由 browser wallet 對該 VM 的一次性註冊訊息簽署，將第一個 wallet 設為 admin；VM 不保存 private key。
+_Avoid_: anonymous bootstrap、public admin
+
 **Update policy**：
-由授權 wallet 簽署的排程維護規則，限定可更新的 managed component、更新範圍與有效期限。
+由具管理權限的使用者設定的排程維護規則，限定可更新的 managed component 與更新範圍；啟用後持續生效，直到明確停用或修改，不受登入狀態或到期日限制。
 _Avoid_: arbitrary scheduled command、unbounded automation
 
 **Update run**：

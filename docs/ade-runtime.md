@@ -98,11 +98,17 @@ uv run --frozen ade publish-html delete architecture
 
 ## Agent environment service
 
-`Agent environment service` 是每台 VM 獨立的管理面，與 Web artifact publisher 分開。它以 allowlist 登錄 Orca、Codex、Capability provider 與 VM services，提供公開 read-only health/dashboard、JSON API、wallet-signed manual controls、signed update policy 與 update history。元件可宣告 `target_version_arg`，讓簽署的目標版本以 argv 傳給固定更新器；內建 Orca updater 會驗證 release manifest 的版本、大小與 SHA-512。
+`Agent environment service` 是每台 VM 獨立的管理面，與 Web artifact publisher 分開。它以 allowlist 登錄 Orca、Codex、Capability provider 與 VM services，提供登入後可讀取的 health/dashboard、JSON API、session 授權的手動操作、持續生效的 Update policy 與 update history。元件可宣告 `target_version_arg`，讓核准的目標版本以 argv 傳給固定更新器；內建 Orca updater 會驗證 release manifest 的版本、大小與 SHA-512。
 
 Linux + systemd VM 可用 [`deploy/agent-environment/`](../deploy/agent-environment/) 安裝。預設管理面使用 HTTPS port `6790`，每日 `04:00 UTC+8` 執行更新，也就是 `20:00 UTC`；`Persistent=true` 會在 VM 錯過時間後補跑。更新由 root-owned helper 執行，Orca 與 Codex 會依 manifest 的固定 command 更新，MCP 與其他 service 只有登錄後才會被管理。
 
-管理面可公開讀取 health，但更新、restart、rollback 與 policy 變更都需要 Solana wallet signature。`Environment status snapshot` 預設不發布，VM opt-in 後才用 `ade publish-html` 發布到獨立的 artifact publisher；snapshot 只含 sanitized health、版本與時間資訊。
+管理面可設定 `allow_http: true`、`tls: {}` 與 HTTP `public_origin`，供公司 VPN／Tailscale 直接存取；額外入口須加入 `allowed_origins`。HTTP 的傳輸保護由外部網路提供。登入使用 VM、origin、nonce 與期限綁定的自訂 challenge，非 SIWE。
+
+未登入時只顯示登入入口，包含 `/healthz` 在內的環境 API 都需要 wallet session。首次連接 wallet 時可開始 `Wallet registration`，使用者以 browser wallet 簽署一次性註冊訊息後成為該 VM 的 admin。登入再簽署一次，建立 12 小時的 Wallet-authorized session；有效期間內，角色允許的更新、重啟與排程設定免再次簽署。同一分頁重新整理會恢復並驗證 session。Root helper 保存 token 雜湊及一次性操作核准紀錄，執行前會再次檢查 session 與角色。更新失敗時，更新器依 manifest 執行 rollback。
+
+Admin 可啟用、修改或停用每日更新。新排程沒有到期日，登出、session 過期或原設定者的身份異動都不會取消排程；執行時仍受 VM 與元件 allowlist 限制。設定保存在 root-owned `/etc/ade/agent-environment.auth/policy.json`，既有共用 state 中的簽署 policy 僅作為尚未替換時的相容來源。升級前須安裝 `agent-environment-authorize` helper 與 sudoers entry，再重啟管理服務，詳見 [部署文件](../deploy/agent-environment/README.md)與 [ADR-0013](adr/0013-wallet-authorized-environment-session.md)。
+
+`Environment status snapshot` 預設不發布，VM opt-in 後才用 `ade publish-html` 發布到獨立的 artifact publisher；snapshot 只含 sanitized health、版本與時間資訊。
 
 ## Review
 

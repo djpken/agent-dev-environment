@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+[[ $(id -u) == 0 ]] || { echo 'agent-environment-authorize must run as root' >&2; exit 1; }
+[[ $# -eq 0 ]] || { echo 'agent-environment-authorize does not accept command arguments' >&2; exit 2; }
+
+source /etc/ade/agent-environment.env
+export UV_CACHE_DIR=/var/lib/ade/agent-environment/root-uv-cache
+
+# Bearer credentials stay on stdin, never in argv or the environment.
+exec /home/orca/.local/bin/uv run --frozen --no-sync --project "$ADE_SOURCE_ROOT" \
+  python -m ade.cli environment authorize \
+  --config /etc/ade/agent-environment.json

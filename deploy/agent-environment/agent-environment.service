@@ -17,7 +17,8 @@ UMask=0077
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/lib/ade/agent-environment /var/lib/ade/agent-environment/uv-cache
+# Enrollment and session authorization use root helpers; Unix ownership denies service-user writes.
+ReadWritePaths=/etc/ade /var/lib/ade/agent-environment /var/lib/ade/agent-environment/uv-cache
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 RestrictSUIDSGID=true
 LockPersonality=true
