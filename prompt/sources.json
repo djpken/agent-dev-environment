@@ -105,6 +105,13 @@
       "origin": "~/.claude/CLAUDE.md",
       "import_commit": null,
       "upstream": null
+    },
+    {
+      "id": "1password-cli",
+      "local": "prompt/prompt_1password-cli.zh-tw.md",
+      "origin": "本地維護的 1Password CLI 使用政策",
+      "import_commit": null,
+      "upstream": null
     }
   ]
 }

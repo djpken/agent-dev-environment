@@ -6,6 +6,12 @@
       "sourceType": "github",
       "skillPath": "skills/documentation-writer/SKILL.md",
       "computedHash": "ee53d65b163cd7eb953a930c95841cfe398cc2c0bd24c06508bbaa07c432be35"
+    },
+    "run-github-scout": {
+      "source": "yigitkonur/skills-by-yigitkonur",
+      "sourceType": "github",
+      "skillPath": "skills/run-github-scout/SKILL.md",
+      "computedHash": "00613b03c265222aef8ef251d7b06b6a41a26ec972610263476e7a794811bcd9"
     }
   }
 }

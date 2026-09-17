@@ -18,7 +18,7 @@ uv run --frozen python -m unittest discover -s tests -v
 
 The plan ID covers the bundled workflow contents. Skills and prompts are captured from this repository, while external provider versions remain locked. Model review stays blocked until an explicit endpoint and credentials are configured. Existing skill names and the plugin identity remain unchanged.
 
-See the [runtime guide](./docs/ade-runtime.md), [Plane-to-Linear sync](./docs/ade-plane-linear-sync.md), and [responsibility boundaries](./docs/ade-responsibilities.md). Python runtime code lives in `ade/`; workflows remain in `skills/` and `prompt/`. npm is used only for changesets.
+See the [runtime guide](./docs/ade-runtime.md), [user-level SSH MCP setup](./docs/ssh-mcp.md), [Plane-to-Linear sync](./docs/ade-plane-linear-sync.md), and [responsibility boundaries](./docs/ade-responsibilities.md). Python runtime code lives in `ade/`; workflows remain in `skills/` and `prompt/`. npm is used only for changesets.
 
 ## Module boundaries
 
