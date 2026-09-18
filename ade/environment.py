@@ -24,13 +24,15 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from eth_keys.exceptions import BadSignature
+
+from . import core, environment_artifacts
 
 
 ENVIRONMENT_VERSION = "1"
@@ -341,6 +343,7 @@ class EnvironmentConfig:
     manual_trigger: Path
     registration_trigger: Path
     authorization_trigger: Path
+    artifacts: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: str | Path) -> "EnvironmentConfig":
@@ -378,6 +381,10 @@ class EnvironmentConfig:
         allowed_origins = raw.get("allowed_origins", [])
         if not isinstance(allowed_origins, list) or not all(isinstance(item, str) for item in allowed_origins):
             raise EnvironmentError("allowed_origins must be a list")
+        try:
+            artifacts = environment_artifacts.configuration(raw.get("artifacts", {}), [public_origin, *allowed_origins])
+        except (core.Error, ValueError) as exc:
+            raise EnvironmentError(str(exc)) from exc
         raw_components = raw.get("components", [])
         if not isinstance(raw_components, list) or not raw_components:
             raise EnvironmentError("components must be a non-empty list")
@@ -424,6 +431,7 @@ class EnvironmentConfig:
             authorized_wallets=tuple(authorized),
             schedule=dict(schedule),
             snapshot=dict(snapshot),
+            artifacts=artifacts,
             manual_trigger=manual_trigger,
             registration_trigger=registration_trigger,
             authorization_trigger=Path(raw.get("authorization_trigger", "/usr/local/sbin/agent-environment-authorize")).expanduser().resolve(),
@@ -840,7 +848,7 @@ def render_snapshot(config: EnvironmentConfig, health: Mapping[str, Any], run: M
         run_text = f"{html.escape(str(run.get('status', 'unknown')))} · {html.escape(str(run.get('finished_at') or run.get('created_at') or ''))}"
     return f"""<!doctype html>
 <html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
-<title>Agent environment · {html.escape(config.vm_id)}</title>
+<title>ADES · {html.escape(config.vm_id)}</title>
 <style>
 body{{font:15px system-ui,sans-serif;background:#101318;color:#e8edf2;margin:0;padding:32px}}
 main{{max-width:960px;margin:auto}}h1{{font-size:28px;margin:0 0 8px}}p{{color:#aab5c1}}
@@ -849,7 +857,7 @@ th,td{{padding:13px 15px;text-align:left;border-bottom:1px solid #2a3440}}th{{co
 .status{{border-radius:999px;padding:4px 9px;font-size:12px}}.healthy{{background:#123d2a;color:#7ce2a5}}.degraded,.unknown{{background:#433514;color:#ffd37a}}.unhealthy{{background:#4b1e27;color:#ff9aa8}}
 code{{color:#9fd4ff}}
 </style></head><body><main>
-<h1>Agent environment</h1><p>VM <code>{html.escape(config.vm_id)}</code> · overall <strong>{html.escape(str(health.get('status', 'unknown')))}</strong></p>
+<h1>ADES</h1><p>Agent Development Environment Service</p><p>VM <code>{html.escape(config.vm_id)}</code> · overall <strong>{html.escape(str(health.get('status', 'unknown')))}</strong></p>
 <table><thead><tr><th>Component</th><th>Health</th><th>Version</th><th>Checked</th></tr></thead><tbody>{''.join(component_rows)}</tbody></table>
 <p>Last update run: {run_text}</p>
 </main></body></html>"""
@@ -1078,7 +1086,7 @@ class UpdateCoordinator:
 def dashboard_html(config: EnvironmentConfig) -> str:
     return """<!doctype html>
 <html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
-<title>Sign in · Agent environment</title>
+<title>Sign in · ADES</title>
 <style>
 :root{color-scheme:dark;font:15px system-ui,sans-serif;background:#0d1117;color:#eef2f6}
 body{margin:0;padding:28px}main{max-width:1100px;margin:auto}header{display:flex;justify-content:space-between;gap:16px;align-items:start;margin-bottom:24px}
@@ -1086,15 +1094,27 @@ h1{font-size:30px;margin:0 0 6px}p{color:#aab5c1;margin:6px 0}button{border:1px 
 .panel{background:#151b23;border:1px solid #2b3542;border-radius:14px;padding:18px;margin:16px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
 .card{background:#1a212b;border:1px solid #2b3542;border-radius:12px;padding:15px}.card h3{margin:0 0 8px;font-size:16px}.muted{color:#9ca9b7;font-size:13px}
 .badge{display:inline-block;border-radius:999px;padding:4px 9px;font-size:12px;margin-bottom:8px}.healthy{background:#123d2a;color:#7ce2a5}.degraded,.unknown{background:#433514;color:#ffd37a}.unhealthy{background:#4b1e27;color:#ff9aa8}.updating{background:#233860;color:#a8c9ff}
-code{color:#a6d8ff}pre{white-space:pre-wrap;word-break:break-word;color:#c9d1d9}.row{display:flex;justify-content:space-between;gap:12px;align-items:center}.notice{border-color:#8b6a2b;background:#2a2415}
-</style></head><body><main><header><div><h1>Agent environment</h1><p>登入後查看環境資訊。</p></div><div><button id=\"wallet\">Connect / register MetaMask</button><button id=\"refresh\" hidden>Refresh</button><button id=\"logout\" hidden>Sign out</button><p id=\"auth\" class=\"muted\">請連接 MetaMask 登入。</p></div></header>
+a{color:#a6d8ff}input,select{background:#0d1117;color:#eef2f6;border:1px solid #65758a;border-radius:6px;padding:9px;max-width:100%;box-sizing:border-box}label{display:block;margin:12px 0}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #a6d8ff;outline-offset:3px}.artifact-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}code{color:#a6d8ff}pre{white-space:pre-wrap;word-break:break-word;color:#c9d1d9}.row{display:flex;justify-content:space-between;gap:12px;align-items:center}.notice{border-color:#8b6a2b;background:#2a2415}
+</style></head><body><main><header><div><h1>ADES</h1><p>Agent Development Environment Service</p><p>登入後查看環境資訊。</p></div><div><button id=\"wallet\">Connect / register MetaMask</button><button id=\"refresh\" hidden>Refresh</button><button id=\"logout\" hidden>Sign out</button><p id=\"auth\" class=\"muted\">請連接 MetaMask 登入。</p></div></header>
 <section class="panel notice" id="registration" hidden><h2>Register this VM</h2><p id="registration-status">尚未註冊。請連接 MetaMask，簽署註冊訊息。</p></section>
 <div id="private" hidden><section class=\"panel\"><div class=\"row\"><div><strong id=\"overall\"></strong><p id=\"checked\" class=\"muted\"></p></div><button id=\"update-all\" disabled>Update all</button></div><div id=\"components\" class=\"grid\"></div></section>
+<section class="panel" id="artifact-panel" hidden><h2>網頁發布</h2>
+<p>發布後，持有連結的人都能開啟作品。請勿上傳密鑰或私人資料。</p>
+<p id="artifact-status" role="status" aria-live="polite"></p>
+<form id="artifact-form" hidden>
+<label for="artifact-name">作品名稱</label><input id="artifact-name" required pattern="[a-z][a-z0-9-]{0,63}" maxlength="64" placeholder="my-report">
+<p class="muted">使用小寫英文字母、數字與連字號，以英文字母開頭。</p>
+<label for="artifact-files">選擇 HTML 與資源檔</label><input id="artifact-files" type="file" multiple>
+<label for="artifact-folder">或選擇完整資料夾</label><input id="artifact-folder" type="file" webkitdirectory multiple>
+<label for="artifact-entrypoint">首頁</label><select id="artifact-entrypoint" required></select>
+<p id="artifact-selection" class="muted">最多 200 個檔案，合計 10 MiB。資料夾會保留內部路徑。</p>
+<button id="artifact-publish" type="submit" disabled>發布網頁</button>
+</form><div id="artifacts" class="grid"></div></section>
 <section class=\"panel\"><h2>Schedule</h2><p id=\"schedule\"></p><p id=\"policy\" class=\"muted\"></p><button id=\"authorize-policy\" disabled>Enable daily updates</button> <button id=\"disable-policy\" disabled>Disable daily updates</button></section>
 <section class=\"panel\"><h2>Update runs</h2><div id=\"runs\" class=\"muted\"></div></section>
 </div>
 <script>
-const state = {session:null, address:null, role:null, provider:null, components:[], generation:0};
+const state = {session:null, address:null, role:null, provider:null, components:[], artifacts:[], uploadFiles:[], publishing:false, publisherReady:false, generation:0};
 const storageKey = 'ade.environment.session.v1';
 let sessionExpiryTimer;
 const $ = id => document.getElementById(id);
@@ -1161,14 +1181,20 @@ function resetWallet() {
   state.generation++;
   state.session = state.address = state.role = null;
   state.components = [];
+  state.artifacts = [];
+  state.uploadFiles = [];
+  state.publisherReady = false;
+  for (const id of ['artifact-name','artifact-files','artifact-folder']) $(id).value = '';
+  $('artifact-entrypoint').innerHTML = '';
+  $('artifact-panel').hidden = true;
   remember(null);
   $('auth').textContent = '請連接 MetaMask 登入。';
   for (const id of ['private','registration','refresh','logout']) $(id).hidden = true;
-  for (const id of ['registration-status','overall','checked','components','schedule','policy','runs']) $(id).textContent = '';
+  for (const id of ['registration-status','overall','checked','components','schedule','policy','runs','artifacts','artifact-status','artifact-selection']) $(id).textContent = '';
   $('overall').className = '';
   $('wallet').textContent = 'Connect / register MetaMask';
   $('wallet').disabled = false;
-  for (const id of ['update-all','authorize-policy','disable-policy']) $(id).disabled = true;
+  for (const id of ['update-all','authorize-policy','disable-policy','artifact-publish']) $(id).disabled = true;
 }
 function acceptSession(session) {
   state.session = session.session;
@@ -1230,8 +1256,9 @@ async function setPolicy(enabled) {
 async function refresh() {
   if (!state.session) { resetWallet(); return; }
   const token = state.session;
-  const [health, schedule, runs] = await Promise.all([json('/api/v1/health'), json('/api/v1/schedule'), json('/api/v1/runs')]);
+  const [health, schedule, runs, artifacts] = await Promise.all([json('/api/v1/health'), json('/api/v1/schedule'), json('/api/v1/runs'), json('/api/v1/artifacts').catch(error => { if (error.status === 401) throw error; return {enabled:true, artifacts:[], error:error.message}; })]);
   if (token !== state.session) return;
+  renderArtifacts(artifacts);
   $('private').hidden = false;
   $('registration').hidden = true;
   $('refresh').hidden = $('logout').hidden = false;
@@ -1250,6 +1277,76 @@ async function refresh() {
   $('authorize-policy').disabled = state.role !== 'admin' || !state.components.some(c => c.update_supported);
   $('disable-policy').disabled = state.role !== 'admin' || !schedule.policy_valid;
 }
+function canPublish() { return ['operator','admin'].includes(state.role); }
+function updatePublishButton() {
+  $('artifact-publish').disabled = !canPublish() || !state.publisherReady || state.publishing || !state.uploadFiles.length || !$('artifact-entrypoint').value;
+}
+function renderArtifacts(data) {
+  state.artifacts = data.artifacts || [];
+  state.publisherReady = !!data.publisher_ready;
+  $('artifact-panel').hidden = !data.enabled;
+  $('artifact-form').hidden = !canPublish();
+  $('artifact-status').textContent = data.error || (data.publisher_ready ? `${state.artifacts.length} 個作品` : 'publish blocked：網頁發布服務尚未就緒。');
+  $('artifacts').innerHTML = state.artifacts.map(a => `<article class="card"><h3>${esc(a.name)}</h3><p>${a.file_count} 個檔案 · ${(a.size_bytes / 1024).toFixed(1)} KiB</p><div class="artifact-actions">${(a.pages || []).map(p => `<a href="${esc(p.access_url)}" target="_blank" rel="noopener noreferrer">${esc(p.entrypoint)}</a>`).join(' ')}${canPublish() ? `<button type="button" class="artifact-delete" data-name="${esc(a.name)}">刪除</button>` : ''}</div></article>`).join('') || '<p>尚未發布作品。</p>';
+  document.querySelectorAll('.artifact-delete').forEach(button => button.onclick = () => deleteArtifact(button.dataset.name).catch(showError));
+  updatePublishButton();
+}
+function selectArtifactFiles(input, folder) {
+  const files = Array.from(input.files || []);
+  $(folder ? 'artifact-files' : 'artifact-folder').value = '';
+  state.uploadFiles = files.map(file => ({file, path:folder ? file.webkitRelativePath.split('/').slice(1).join('/') : file.name}));
+  const size = files.reduce((total, file) => total + file.size, 0);
+  if (files.length > 200 || size > 10 * 1024 * 1024) {
+    state.uploadFiles = [];
+    $('artifact-status').textContent = '檔案超過限制：最多 200 個檔案、合計 10 MiB。';
+  }
+  const pages = state.uploadFiles.filter(item => /[.]html?$/i.test(item.path));
+  pages.sort((a,b) => (a.path !== 'index.html') - (b.path !== 'index.html') || a.path.localeCompare(b.path));
+  $('artifact-entrypoint').innerHTML = pages.map(p => `<option value="${esc(p.path)}">${esc(p.path)}</option>`).join('');
+  $('artifact-selection').textContent = `${state.uploadFiles.length} 個檔案 · ${(size / 1024).toFixed(1)} KiB` + (pages.length ? '' : ' · 請選擇至少一個 HTML 檔案');
+  updatePublishButton();
+}
+async function deleteArtifact(name) {
+  if (!canPublish() || !window.confirm(`刪除「${name}」？作品連結將失效，且無法復原。`)) return;
+  const token = state.session;
+  await json('/api/v1/artifacts/' + encodeURIComponent(name), {method:'DELETE'});
+  if (token === state.session) await refresh();
+}
+async function publishArtifact(event) {
+  event.preventDefault();
+  if (!canPublish() || state.publishing || !state.uploadFiles.length) return;
+  const name = $('artifact-name').value;
+  const entrypoint = $('artifact-entrypoint').value;
+  const overwrite = state.artifacts.some(a => a.name === name);
+  if (overwrite && !window.confirm(`取代「${name}」的全部檔案？舊內容將被覆蓋。`)) return;
+  const token = state.session;
+  state.publishing = true;
+  updatePublishButton();
+  $('artifact-status').textContent = '正在發布…';
+  try {
+    const files = [];
+    for (const item of state.uploadFiles) {
+      const bytes = new Uint8Array(await item.file.arrayBuffer());
+      let binary = '';
+      for (let i=0; i<bytes.length; i+=8192) binary += String.fromCharCode(...bytes.subarray(i,i+8192));
+      files.push({path:item.path, content_base64:btoa(binary)});
+    }
+    if (token !== state.session) return;
+    const receipt = await json('/api/v1/artifacts', {method:'POST', body:JSON.stringify({name, entrypoint, files, overwrite})});
+    if (token !== state.session) return;
+    await refresh();
+    if (token === state.session) $('artifact-status').textContent = `已發布 ${receipt.name}，可從下方連結開啟。`;
+  } catch (error) {
+    if (token === state.session) $('artifact-status').textContent = error.message;
+  } finally {
+    state.publishing = false;
+    updatePublishButton();
+  }
+}
+$('artifact-form').onsubmit = publishArtifact;
+$('artifact-files').onchange = event => selectArtifactFiles(event.target, false);
+$('artifact-folder').onchange = event => selectArtifactFiles(event.target, true);
+$('artifact-entrypoint').onchange = updatePublishButton;
 function showError(error) { $('auth').textContent = error.message; }
 async function restoreSession() {
   let saved;
@@ -1562,6 +1659,20 @@ class EnvironmentHTTPServer:
             return 200, environment_health(self.config)
         if method == "GET" and path == "/api/v1/components":
             return 200, {"vm_id": self.config.vm_id, "components": environment_health(self.config)["components"]}
+        if path == "/api/v1/artifacts" or path.startswith("/api/v1/artifacts/"):
+            try:
+                if method == "GET" and path == "/api/v1/artifacts":
+                    return 200, environment_artifacts.listing(self.config.artifacts)
+                if method == "POST" and path == "/api/v1/artifacts":
+                    self.session(handler, "operator")
+                    return 201, environment_artifacts.upload(self.config.artifacts, handler.json_payload())
+                if method == "DELETE" and path.startswith("/api/v1/artifacts/"):
+                    self.session(handler, "operator")
+                    return 200, environment_artifacts.remove(self.config.artifacts, path.removeprefix("/api/v1/artifacts/"))
+            except core.Error as exc:
+                raise EnvironmentError(str(exc)) from exc
+            except OSError as exc:
+                raise EnvironmentError("web artifact storage is unavailable") from exc
         if method == "GET" and path == "/api/v1/runs":
             return 200, {"runs": [_run_public(run, self.config) for run in self.store.list()]}
         if method == "GET" and path == "/api/v1/schedule":
@@ -1607,7 +1718,8 @@ class EnvironmentHTTPServer:
                     length = int(self.headers.get("Content-Length", "0"))
                 except ValueError as exc:
                     raise EnvironmentError("invalid content length") from exc
-                if length <= 0 or length > 64 * 1024:
+                limit = environment_artifacts.MAX_REQUEST_BYTES if self.command == "POST" and self.path == "/api/v1/artifacts" else 64 * 1024
+                if length <= 0 or length > limit:
                     raise EnvironmentError("JSON request body is too large or empty")
                 try:
                     value = json.loads(self.rfile.read(length).decode("utf-8"))
@@ -1624,6 +1736,8 @@ class EnvironmentHTTPServer:
                 return origin in app.config.allowed_origins or origin == app.config.public_origin or "*" in app.config.allowed_origins
 
             def send_value(self, status: int, value: Any) -> None:
+                # Rejected uploads may leave unread bytes; never reuse that connection.
+                self.close_connection = True
                 if value is None:
                     body = b""
                     content_type = "text/plain; charset=utf-8"
@@ -1636,6 +1750,7 @@ class EnvironmentHTTPServer:
                 self.send_response_only(status)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(body)))
+                self.send_header("Connection", "close")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'")
@@ -1679,12 +1794,15 @@ class EnvironmentHTTPServer:
             def do_PUT(self) -> None:
                 self.dispatch()
 
+            def do_DELETE(self) -> None:
+                self.dispatch()
+
             def do_OPTIONS(self) -> None:
                 if not self.origin_allowed():
                     self.send_value(403, {"error": "origin is not allowed"})
                     return
                 self.send_response_only(204)
-                self.send_header("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS")
+                self.send_header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
                 self.send_header("Access-Control-Allow-Headers", "Content-Type,Authorization")
                 self.send_header("Access-Control-Max-Age", "600")
                 origin = self.headers.get("Origin")

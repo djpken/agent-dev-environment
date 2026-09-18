@@ -6,6 +6,8 @@ import re
 import shutil
 import tempfile
 import uuid
+import urllib.request
+import urllib.error
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote, urlparse
 
@@ -136,7 +138,53 @@ def _public_root(root):
     return public_root
 
 
-def publish(source, name, artifact_root, base_url, entrypoint=None):
+def publisher_ready(base_url):
+    parsed = validate_base_url(base_url)
+    host = parsed.hostname
+    if ":" in host:
+        host = "[" + host + "]"
+    request = urllib.request.Request("http://127.0.0.1:80/healthz", headers={"Host": host})
+    try:
+        with urllib.request.urlopen(request, timeout=2):
+            return
+    except (OSError, urllib.error.URLError) as exc:
+        raise core.Error("publish blocked: HTTP publisher unavailable at 127.0.0.1:80") from exc
+
+
+def inventory(artifact_root, base_url):
+    """List CLI and dashboard artifacts without following links or exposing hidden files."""
+    validate_base_url(base_url)
+    root = Path(artifact_root).resolve()
+    if not root.exists():
+        return []
+    with _lock(root) as lock:
+        fcntl.flock(lock, fcntl.LOCK_SH)
+        public_root = root / "artifacts"
+        core.check(not public_root.is_symlink(), "artifact root may not contain symbolic links")
+        if not public_root.exists():
+            return []
+        items = []
+        for artifact in sorted(public_root.iterdir()):
+            if not NAME_PATTERN.fullmatch(artifact.name) or artifact.is_symlink() or not artifact.is_dir():
+                continue
+            pages, size, count = [], 0, 0
+            for parent, dirs, files in os.walk(artifact, followlinks=False):
+                dirs[:] = sorted(d for d in dirs if not d.startswith(".") and not (Path(parent) / d).is_symlink())
+                for filename in sorted(files):
+                    path = Path(parent) / filename
+                    if filename.startswith(".") or path.is_symlink() or not path.is_file():
+                        continue
+                    size += path.stat().st_size
+                    count += 1
+                    relative = path.relative_to(artifact).as_posix()
+                    if path.suffix.lower() in HTML_SUFFIXES:
+                        pages.append({"entrypoint": relative, "access_url": _access_url(base_url, artifact.name, relative)})
+            pages.sort(key=lambda page: (page["entrypoint"] != "index.html", page["entrypoint"]))
+            items.append({"name": artifact.name, "pages": pages, "file_count": count, "size_bytes": size})
+        return items
+
+
+def publish(source, name, artifact_root, base_url, entrypoint=None, *, overwrite=True):
     """Publish one HTML file or bundle and return its browser access receipt."""
     _validate_name(name)
     source_path = Path(source)
@@ -154,6 +202,7 @@ def publish(source, name, artifact_root, base_url, entrypoint=None):
     with _lock(root) as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         public_root = _public_root(root)
+        core.check(overwrite or not _path_exists(destination), "artifact already exists; confirm replacement")
         stage = Path(tempfile.mkdtemp(prefix="." + name + ".stage-", dir=public_root))
         stage.chmod(0o755)
         try:

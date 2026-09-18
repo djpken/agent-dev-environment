@@ -1,6 +1,6 @@
-# Agent environment service
+# ADES · Agent Development Environment Service
 
-`Agent environment service` is a per-VM management plane for agent runtime
+ADES is a per-VM management plane for agent runtime
 components. It is separate from the `Web artifact publisher`: the service owns
 health, component updates, manual controls, persistent update policies, and the
 daily systemd timer; `ade publish-html` remains an optional output for a
@@ -54,6 +54,89 @@ size, and SHA-512 before stopping the service; Codex receives the exact
 The example includes Orca, Codex, nginx, the artifact publisher, Codex proxy,
 and Headroom proxy. Add other MCP or system services to the manifest with an
 explicit allowlist and an update method.
+
+## Standard HTTP and HTTPS entrypoints
+
+Use [nginx.conf.example](./nginx.conf.example) to expose the management dashboard
+through Nginx. Replace `__PUBLIC_HOST__` with the external VM address or configured
+hostname, and ensure the certificate covers that address. If a publisher vhost
+already owns port 80 for the same host, merge the root redirect and `/api/`
+redirect into it instead of creating a duplicate vhost. Preserve its artifact,
+readiness and any unrelated routes.
+
+- `http://172.16.240.41:80/` redirects to `https://172.16.240.41/`.
+- Nginx terminates TLS on port 443 and proxies the dashboard/API to port 6790.
+- Published artifacts stay on `http://172.16.240.41:80/artifacts/`.
+- The HTTPS management vhost rejects `/artifacts/`, keeping user HTML on a separate origin.
+
+Set `public_origin` to `https://172.16.240.41` in the environment manifest.
+For an HTTP backend use `tls: {}` and `allow_http: true`; the public TLS connection
+terminates at Nginx. Add the old port 6790 origin to `allowed_origins` only if that
+entrypoint is intentionally retained. A loopback-only backend can instead use
+`listen.host: "127.0.0.1"`. Do not add the HTTP port 80 artifact origin to the
+management allowlist. The proxy accepts 15 MiB JSON bodies, matching the upload API.
+
+Back up the live Nginx and environment configuration, run `nginx -t`, restart
+`agent-environment.service`, and reload Nginx. Existing self-signed certificates
+require client trust; use a trusted certificate when available. A new browser
+origin requires signing in again, while the enrolled wallet and update policies
+are preserved. Reverting the saved configurations and reloading/restarting the
+same services restores the previous entrypoint.
+
+The product name is ADES. Existing `agent-environment.service`, configuration
+paths, CLI subcommands and API identifiers remain unchanged for compatibility.
+
+## Web publishing from the dashboard
+
+The management dashboard includes an authenticated web publishing panel. It shares
+storage and publication rules with `ade publish-html`; Nginx continues to serve
+published content on HTTP port 80. The dashboard and its session stay on port 6790.
+Do not serve uploaded HTML on the management origin or add the artifact origin
+to `allowed_origins`.
+
+Enable publishing in the root-owned `/etc/ade/agent-environment.json`:
+
+```json
+{
+  "artifacts": {
+    "enabled": true,
+    "artifact_root": "/var/lib/ade/web-artifacts",
+    "base_url": "http://172.16.240.41:80"
+  }
+}
+```
+
+Existing manifests default to disabled. New installation templates enable the
+panel. Configure Nginx using [the publisher setup](../ade-web-artifacts/README.md),
+and give the management service user ownership of the artifact directory and
+existing published files. The installer creates the default directory for new
+installations; it preserves existing contents and ownership. The systemd unit
+allows writes to `/var/lib/ade/web-artifacts`; a custom root also needs an explicit
+`ReadWritePaths` override. Restart `agent-environment.service` after changing its
+manifest or unit, and run `systemctl daemon-reload` after a unit change.
+
+After wallet login, viewers can list and open existing publications, including
+those created through the CLI. Operators and admins can upload HTML files and
+assets, or select a folder preserving relative asset paths. Select the HTML
+entrypoint and a lowercase artifact name. Each upload accepts at most 200 files
+and 10 MiB of decoded content. The UI requires confirmation before replacing an
+existing name or deleting a publication. Replacement replaces the whole bundle;
+files omitted from the new upload are removed. Deletion cannot be undone.
+Published URLs are readable by anyone who can reach the publisher, without wallet
+login. The dashboard never renders uploaded HTML inside its own origin.
+
+The session-authenticated API is:
+
+- `GET /api/v1/artifacts`: publication list, entrypoint URLs, sizes and publisher readiness.
+- `POST /api/v1/artifacts`: operator/admin upload, returning the publication receipt.
+- `DELETE /api/v1/artifacts/<name>`: operator/admin deletion.
+
+Upload JSON contains `name`, `entrypoint`, an optional boolean `overwrite`
+(default `false`), and `files`: objects with a relative `path` and
+`content_base64`. The encoded request limit is 15 MiB. Clients cannot choose a
+server source path, storage root or public origin. Invalid bundles and blocked
+publishers preserve the existing publication. List and delete remain available
+when Nginx is unavailable.
 
 ## API and dashboard
 

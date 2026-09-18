@@ -32,12 +32,12 @@ function page({holdVerify=false} = {}) {
   const started = new Promise(resolve => { verifyStarted = resolve; });
   const gate = new Promise(resolve => { releaseVerify = resolve; });
   const context = vm.createContext({
-    console, TextEncoder, Date,
+    console, TextEncoder, Date, Uint8Array, btoa:value => Buffer.from(value, 'binary').toString('base64'),
     document:{getElementById:get, querySelectorAll:() => []},
     sessionStorage:{getItem:key => storage.get(key) || null, setItem:(key,value) => storage.set(key,value), removeItem:key => storage.delete(key)},
     setTimeout:() => 1, clearTimeout:() => {},
     Event:class {}, location:{origin:'https://vm.example'},
-    window:{ethereum:provider, addEventListener:() => {}, dispatchEvent:() => {}},
+    window:{confirm:() => true, ethereum:provider, addEventListener:() => {}, dispatchEvent:() => {}},
     async fetch(url, options={}) {
       const payload = options.body ? JSON.parse(options.body) : null;
       requests.push({url, payload, headers:options.headers});
@@ -53,6 +53,9 @@ function page({holdVerify=false} = {}) {
       else if (url === '/api/v1/auth/logout') { revocations++; data={signed_out:true}; }
       else if (url === '/api/v1/health') data={status:'healthy', vm_id:'vm', checked_at:'now', components:[{id:'codex',label:'Codex',status:'healthy',update_supported:true}]};
       else if (url === '/api/v1/schedule') data={schedule:{time:'04:00',timezone:'UTC+8',persistent:true},policy_valid:policyEnabled,policy_reason:'disabled'};
+      else if (url === '/api/v1/artifacts' && options.method === 'POST') data={name:payload.name,access_url:'http://vm.example:80/artifacts/report/index.html'};
+      else if (url === '/api/v1/artifacts' && !options.method) data={enabled:true,publisher_ready:true,artifacts:[{name:'report',file_count:1,size_bytes:20,pages:[{entrypoint:'index.html',access_url:'http://vm.example:80/artifacts/report/index.html'}]}]};
+      else if (url === '/api/v1/artifacts/report' && options.method === 'DELETE') data={deleted:true};
       else if (url === '/api/v1/runs') data={runs:[]};
       else if (url === '/api/v1/policy') { policyEnabled=payload.enabled; data={valid:policyEnabled}; }
       else if (url === '/api/v1/update-runs') data={id:'run',status:'queued'};
@@ -83,6 +86,19 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
   await first.get('disable-policy').onclick();
   assert.equal(policyEnabled, false);
 
+  assert.equal(first.get('artifact-panel').hidden, false);
+  assert.equal(first.get('artifact-form').hidden, false);
+  assert.match(first.get('artifacts').innerHTML, /rel="noopener noreferrer"/);
+  first.get('artifact-name').value = 'report';
+  first.get('artifact-entrypoint').value = 'index.html';
+  first.run("state.uploadFiles = [{path:'index.html',file:{arrayBuffer:async () => new TextEncoder().encode('<h1>Report</h1>').buffer}}]");
+  await first.get('artifact-form').onsubmit({preventDefault(){}});
+  const uploaded = requests.find(r => r.url === '/api/v1/artifacts' && r.payload);
+  assert.equal(uploaded.payload.overwrite, true);
+  assert.equal(Buffer.from(uploaded.payload.files[0].content_base64, 'base64').toString(), '<h1>Report</h1>');
+  await first.run("deleteArtifact('report')");
+  assert.equal(signatures, 1, 'publishing must reuse the wallet session');
+
   const restored = page();
   await settle();
   assert.equal(restored.get('private').hidden, false, 'reload should restore authenticated data');
@@ -90,6 +106,8 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
   await restored.get('logout').onclick();
   assert.equal(restored.get('private').hidden, true);
   assert.equal(storage.size, 0);
+  assert.equal(restored.get('artifacts').textContent, '');
+  assert.equal(restored.get('artifact-panel').hidden, true);
   assert.equal(revocations, 1);
 
   // Logging out during authentication must revoke the late server session.

@@ -1,0 +1,58 @@
+# Replace __PUBLIC_HOST__ with the VM's external IP or configured hostname.
+# Merge the port 80 locations into an existing publisher vhost when present.
+# Never serve artifact HTML from the HTTPS management origin.
+server {
+    listen 80;
+    server_name __PUBLIC_HOST__;
+
+    location = / {
+        return 302 https://__PUBLIC_HOST__/;
+    }
+
+    location /api/ {
+        return 308 https://__PUBLIC_HOST__$request_uri;
+    }
+
+    location = /healthz {
+        default_type text/plain;
+        add_header Cache-Control "no-store" always;
+        return 200 "ok\n";
+    }
+
+    location ~ ^/artifacts/(?:[^/]+/)*\. {
+        return 404;
+    }
+
+    location /artifacts/ {
+        root /var/lib/ade/web-artifacts;
+        limit_except GET HEAD { deny all; }
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        autoindex off;
+        try_files $uri $uri/ =404;
+    }
+
+    location / { return 404; }
+}
+
+server {
+    listen 443 ssl;
+    server_name __PUBLIC_HOST__;
+    ssl_certificate /etc/ade/tls/agent-environment.crt;
+    ssl_certificate_key /etc/ade/tls/agent-environment.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 15m;
+
+    location /artifacts/ { return 404; }
+
+    location / {
+        proxy_pass http://127.0.0.1:6790;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Connection "";
+        proxy_read_timeout 120s;
+    }
+}

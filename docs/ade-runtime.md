@@ -77,7 +77,7 @@ uv run --frozen ade attach --host codex --workspace /path/to/project --apply
 
 ## Web artifact 發布
 
-`orca serve` profile 中，agent 產生的 HTML 可用 `ade publish-html` 發布給使用者的 browser。Publisher 由 systemd 管理的 nginx 提供 HTTP port `80`，固定使用 `/artifacts/<name>/` path routing。拿到 URL 的人都能讀取內容；固定名稱由最後一次發布覆蓋，刪除只透過 CLI 執行。
+`orca serve` profile 中，agent 產生的 HTML 可用 `ade publish-html` 發布給使用者的 browser。Publisher 由 systemd 管理的 nginx 提供 HTTP port `80`，固定使用 `/artifacts/<name>/` path routing。拿到 URL 的人都能讀取內容；固定名稱由最後一次發布覆蓋，可透過 CLI 或登入管理頁面後刪除。
 
 Publisher root 與 browser origin 可用環境變數設定：
 
@@ -96,11 +96,21 @@ uv run --frozen ade publish-html delete architecture
 
 單檔 HTML 會以 `index.html` 作為 entrypoint；bundle 可包含 HTML、PNG、CSS 與 JS。CLI 會先檢查 `http://127.0.0.1:80/healthz`，服務不可用時回報 `publish blocked`，不把 guest path 當成 browser URL。nginx 設定樣板位於 [`deploy/ade-web-artifacts/`](../deploy/ade-web-artifacts/)。
 
-## Agent environment service
+管理頁面也可共用這套發布功能。在 ADES 的 manifest 設定
+`artifacts.enabled: true`、`artifact_root` 與 `base_url` 後，登入即可列出及開啟既有作品；
+operator／admin 可上傳 HTML 或完整資料夾、選擇首頁、確認覆蓋與刪除。
+上傳限制為 200 個檔案、合計 10 MiB。CLI 與管理頁面使用同一個作品目錄。
+作品維持 HTTP port `80`，管理頁面使用不同 origin；發布內容不會在管理頁面內執行。
+既有 manifest 預設不啟用此功能，設定與 API 詳見
+[管理服務的網頁發布說明](../deploy/agent-environment/README.md#web-publishing-from-the-dashboard)。
 
-`Agent environment service` 是每台 VM 獨立的管理面，與 Web artifact publisher 分開。它以 allowlist 登錄 Orca、Codex、Capability provider 與 VM services，提供登入後可讀取的 health/dashboard、JSON API、session 授權的手動操作、持續生效的 Update policy 與 update history。元件可宣告 `target_version_arg`，讓核准的目標版本以 argv 傳給固定更新器；內建 Orca updater 會驗證 release manifest 的版本、大小與 SHA-512。
+## ADES · Agent Development Environment Service
+
+ADES 是每台 VM 獨立的管理面，與 Web artifact publisher 分開。它以 allowlist 登錄 Orca、Codex、Capability provider 與 VM services，提供登入後可讀取的 health/dashboard、JSON API、session 授權的手動操作、持續生效的 Update policy 與 update history。元件可宣告 `target_version_arg`，讓核准的目標版本以 argv 傳給固定更新器；內建 Orca updater 會驗證 release manifest 的版本、大小與 SHA-512。
 
 Linux + systemd VM 可用 [`deploy/agent-environment/`](../deploy/agent-environment/) 安裝。預設管理面使用 HTTPS port `6790`，每日 `04:00 UTC+8` 執行更新，也就是 `20:00 UTC`；`Persistent=true` 會在 VM 錯過時間後補跑。更新由 root-owned helper 執行，Orca 與 Codex 會依 manifest 的固定 command 更新，MCP 與其他 service 只有登錄後才會被管理。
+
+管理頁面也可由 Nginx 提供標準 `80／443` 入口：HTTP 首頁導向 HTTPS 管理頁面，作品維持 HTTP `80` 的獨立 origin。設定方式見 [Nginx 整合說明](../deploy/agent-environment/README.md#standard-http-and-https-entrypoints)。
 
 管理面可設定 `allow_http: true`、`tls: {}` 與 HTTP `public_origin`，供公司 VPN／Tailscale 直接存取；額外入口須加入 `allowed_origins`。HTTP 的傳輸保護由外部網路提供。登入使用 VM、origin、nonce 與期限綁定的自訂 challenge，非 SIWE。
 

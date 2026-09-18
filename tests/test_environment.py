@@ -666,5 +666,173 @@ class EnvironmentTests(unittest.TestCase):
             self.assertEqual(error.exception.code, 401)
 
 
+    def artifact_server(self, role="admin"):
+        from ade import environment_artifacts
+        key = Account.create()
+        config = self.session_config(key, role)
+        config = replace(config, artifacts=environment_artifacts.configuration({
+            "enabled": True, "artifact_root": str(self.root / "web"),
+            "base_url": "http://vm-test.example:80",
+        }, [config.public_origin]))
+        server, handler, auth = self.authenticate(config, key)
+        handler.path = "/api/v1/artifacts"
+        handler.command = "GET"
+        return server, handler, auth
+
+    def artifact_payload(self, name="report", content="<h1>Hello</h1>"):
+        import base64
+        return {"name": name, "entrypoint": "index.html", "files": [
+            {"path": "index.html", "content_base64": base64.b64encode(content.encode()).decode()}]}
+
+    def test_artifact_upload_list_replace_delete_and_cli_inventory(self):
+        from ade import publish
+        server, handler, _ = self.artifact_server()
+        payload = self.artifact_payload()
+        handler.json_payload = lambda: payload
+        with patch("ade.publish.publisher_ready"):
+            handler.command = "POST"
+            status, receipt = server.handle(handler)
+            self.assertEqual(status, 201)
+            self.assertEqual(receipt["access_url"], "http://vm-test.example:80/artifacts/report/index.html")
+            with self.assertRaisesRegex(EnvironmentError, "confirm replacement"):
+                server.handle(handler)
+            payload.update(self.artifact_payload(content="changed"), overwrite=True)
+            server.handle(handler)
+            self.assertEqual((self.root / "web/artifacts/report/index.html").read_text(), "changed")
+            source = self.root / "legacy.html"
+            source.write_text("CLI")
+            publish.publish(source, "cli-page", self.root / "web", "http://vm-test.example", "pages/home.html")
+            handler.command = "GET"
+            _, listing = server.handle(handler)
+            self.assertEqual([a["name"] for a in listing["artifacts"]], ["cli-page", "report"])
+            self.assertEqual(listing["artifacts"][0]["pages"][0]["entrypoint"], "pages/home.html")
+            handler.command = "DELETE"
+            handler.path += "/report"
+            self.assertTrue(server.handle(handler)[1]["deleted"])
+            self.assertFalse((self.root / "web/artifacts/report").exists())
+
+    def test_artifacts_require_session_and_operator_role(self):
+        server, handler, auth = self.artifact_server("viewer")
+        handler.json_payload = lambda: self.artifact_payload()
+        with patch("ade.publish.publisher_ready"):
+            self.assertEqual(server.handle(handler)[0], 200)
+            for method, path in [("POST", "/api/v1/artifacts"), ("DELETE", "/api/v1/artifacts/report")]:
+                handler.command, handler.path = method, path
+                with self.assertRaisesRegex(EnvironmentError, "operator required"):
+                    server.handle(handler)
+            EnvironmentAuthority(server.config).dispatch({"operation":"logout", "token":auth["session"]})
+            handler.command, handler.path = "GET", "/api/v1/artifacts"
+            with self.assertRaisesRegex(EnvironmentError, "session"):
+                server.handle(handler)
+
+    def test_artifact_invalid_uploads_preserve_existing_content(self):
+        from ade import core
+        server, handler, _ = self.artifact_server()
+        handler.command = "POST"
+        payload = self.artifact_payload()
+        handler.json_payload = lambda: payload
+        with patch("ade.publish.publisher_ready"):
+            server.handle(handler)
+            for path in ["../escape.html", "/escape.html", ".secret/index.html", "a/../../escape", "a\\b.html", "a//b.html"]:
+                payload = self.artifact_payload()
+                payload["overwrite"] = True
+                payload["files"][0]["path"] = path
+                with self.subTest(path=path), self.assertRaises(EnvironmentError):
+                    server.handle(handler)
+            for files in [[], self.artifact_payload()["files"] * 201,
+                          [{"path":"index.html", "content_base64":"%%%"}],
+                          self.artifact_payload()["files"] * 2,
+                          [{"path":"other.html", "content_base64":"eA=="}]]:
+                payload = {**self.artifact_payload(), "files": files, "overwrite": True}
+                with self.subTest(files=len(files)), self.assertRaises(EnvironmentError):
+                    server.handle(handler)
+            with patch("ade.environment_artifacts.MAX_UPLOAD_BYTES", 2):
+                payload = self.artifact_payload()
+                with self.assertRaisesRegex(EnvironmentError, "exceeds"):
+                    server.handle(handler)
+        payload = self.artifact_payload()
+        with patch("ade.publish.publisher_ready", side_effect=core.Error("publish blocked: unavailable")):
+            with self.assertRaisesRegex(EnvironmentError, "publish blocked"):
+                server.handle(handler)
+        self.assertEqual((self.root / "web/artifacts/report/index.html").read_text(), "<h1>Hello</h1>")
+
+    def test_artifact_config_requires_distinct_origin_and_explicit_enable(self):
+        from ade import core, environment_artifacts
+        for origins in [["http://vm.example"], ["http://vm.example:80/"], ["*"]]:
+            with self.assertRaisesRegex(core.Error, "separate origin"):
+                environment_artifacts.configuration({"enabled": True, "base_url":"http://vm.example:80"}, origins)
+        server, handler, _ = self.artifact_server()
+        server.config = replace(server.config, artifacts={"enabled": False})
+        self.assertEqual(server.handle(handler)[1], {"enabled":False, "artifacts":[]})
+        handler.command = "POST"
+        handler.json_payload = lambda: self.artifact_payload()
+        with self.assertRaisesRegex(EnvironmentError, "disabled"):
+            server.handle(handler)
+
+    def test_live_artifact_api_upload_limits_origin_and_revocation(self):
+        server, _, auth = self.artifact_server()
+        server.config = replace(server.config, listen_port=0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        for _ in range(100):
+            if server.httpd:
+                break
+            time.sleep(0.01)
+        self.assertIsNotNone(server.httpd)
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(server.httpd.shutdown)
+        url = "http://127.0.0.1:" + str(server.httpd.server_port)
+        def request(method="GET", path="/api/v1/artifacts", payload=None, token=auth["session"], origin=None):
+            headers = {"Content-Type":"application/json"}
+            if token:
+                headers["Authorization"] = "Bearer " + token
+            if origin:
+                headers["Origin"] = origin
+            req = urllib.request.Request(url + path, method=method, headers=headers,
+                data=json.dumps(payload).encode() if payload is not None else None)
+            with urllib.request.urlopen(req, timeout=5) as response:
+                return response.status, json.load(response)
+        with patch("ade.publish.publisher_ready"):
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                request(token=None)
+            self.assertEqual(error.exception.code, 401)
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                request("POST", payload=self.artifact_payload(), origin="http://vm-test.example")
+            self.assertEqual(error.exception.code, 403)
+            # Uploads larger than the normal control API's 64 KiB limit work.
+            self.assertEqual(request("POST", payload=self.artifact_payload(content="x" * 70000))[0], 201)
+            self.assertEqual(request()[1]["artifacts"][0]["size_bytes"], 70000)
+            with patch("ade.environment_artifacts.MAX_REQUEST_BYTES", 20):
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    request("POST", payload=self.artifact_payload("oversized"))
+                self.assertEqual(error.exception.code, 400)
+            self.assertTrue(request("DELETE", "/api/v1/artifacts/report")[1]["deleted"])
+            request("POST", "/api/v1/auth/logout", {})
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                request("POST", payload=self.artifact_payload())
+            self.assertEqual(error.exception.code, 401)
+
+    def test_artifact_inventory_ignores_hidden_files_and_symlinks(self):
+        from ade import publish
+        root = self.root / "web"
+        public = root / "artifacts"
+        public.mkdir(parents=True)
+        external = self.root / "external"
+        external.mkdir()
+        (external / "secret.html").write_text("secret")
+        (public / "linked").symlink_to(external, target_is_directory=True)
+        page = public / "report"
+        page.mkdir()
+        (page / ".hidden").mkdir()
+        (page / ".hidden/index.html").write_text("secret")
+        (page / "linked").symlink_to(external, target_is_directory=True)
+        (page / "secret.html").symlink_to(external / "secret.html")
+        (page / "index.html").write_text("public")
+        listing = publish.inventory(root, "http://vm.example")
+        self.assertEqual(len(listing), 1)
+        self.assertEqual(listing[0]["file_count"], 1)
+        self.assertEqual(listing[0]["size_bytes"], 6)
+
+
 if __name__ == "__main__":
     unittest.main()

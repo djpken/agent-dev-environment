@@ -44,6 +44,10 @@ source_root=$(cd "$source_root" && pwd -P)
 
 install -d -o root -g root -m 0755 /etc/ade /etc/ade/tls
 install -d -o root -g orca -m 0770 /var/lib/ade/agent-environment
+# The unprivileged dashboard and CLI share the Nginx artifact directory.
+if [[ ! -e /var/lib/ade/web-artifacts ]]; then
+  install -d -o orca -g orca -m 0755 /var/lib/ade/web-artifacts
+fi
 
 source_template=$source_root/deploy/agent-environment/agent-environment.env.example
 config_template=$source_root/deploy/agent-environment/agent-environment.json.example

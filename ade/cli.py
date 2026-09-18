@@ -135,19 +135,7 @@ def install_schedule(root, provider_name, env_file=None, enable=False):
 
 
 def publisher_ready(base_url=DEFAULT_WEB_ARTIFACT_BASE_URL):
-    parsed = html_publish.validate_base_url(base_url)
-    host = parsed.hostname
-    if ":" in host:
-        host = "[" + host + "]"
-    request = urllib.request.Request(
-        "http://127.0.0.1:80/healthz",
-        headers={"Host": host},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=2):
-            return
-    except (OSError, urllib.error.URLError) as exc:
-        raise core.Error("publish blocked: HTTP publisher unavailable at 127.0.0.1:80") from exc
+    return html_publish.publisher_ready(base_url)
 
 
 def publish_html(args):

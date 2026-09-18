@@ -119,5 +119,10 @@
       "enabled": true,
       "public": true
     }
-  ]
+  ],
+  "artifacts": {
+    "enabled": true,
+    "artifact_root": "/var/lib/ade/web-artifacts",
+    "base_url": "http://__PUBLIC_HOST__:80"
+  }
 }

@@ -24,16 +24,16 @@ _Avoid_: ADE runtime repository、Workflow Pack repository
 決定 ADE 工作負載使用哪個 Orca execution host 的命名設定。目前支援 `orca serve` 與 `Local`：前者使用 headless Orca runtime，後者使用目前主機。
 _Avoid_: provider lifecycle、provider profile
 
-**Agent environment service**：
+**Agent Development Environment Service (ADES)**：
 每台 VM 各自擁有的環境管理面，讓 agent 取得該 VM 的 managed component 狀態，並觸發受控的手動或排程維護。
-_Avoid_: Web artifact publisher、public content page、guest path
+_Avoid_: Agent environment service、Web artifact publisher、public content page、guest path
 
 **Managed component**：
-由 Agent environment service 登錄並維護狀態的 Orca runtime、Codex、Capability provider 或 VM service。
+由 ADES 登錄並維護狀態的 Orca runtime、Codex、Capability provider 或 VM service。
 _Avoid_: arbitrary process、MCP config、systemd unit
 
 **Environment management surface**：
-Agent environment service 提供的 live dashboard 與 machine-readable API；使用者透過 Wallet-authorized session，依身份權限查看環境與執行控制操作。
+ADES 提供的 live dashboard 與 machine-readable API；使用者透過 Wallet-authorized session，依身份權限查看環境與執行控制操作。
 _Avoid_: Web artifact、public content page
 
 **Wallet-authorized session**：
@@ -95,7 +95,7 @@ _Avoid_: local file output、preview session
 _Avoid_: guest path、provider URL
 
 **Environment status snapshot**：
-從 Agent environment service 產生、供一般 browser 讀取的 sanitized VM health 與版本摘要；只有 VM opt-in 時才公開，且不包含控制操作。
+從 ADES 產生、供一般 browser 讀取的 sanitized VM health 與版本摘要；只有 VM opt-in 時才公開，且不包含控制操作。
 _Avoid_: management API、private runtime state
 
 **Guest path**：
