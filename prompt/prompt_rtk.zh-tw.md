@@ -1,6 +1,8 @@
 # RTK - Rust Token Killer
 
-**用途**：token 最佳化的 CLI proxy（開發操作可省 60-90% token）
+**用途**：壓縮支援指令的輸出；實際效益用 `rtk gain` 查詢，不代表整段任務的總 token 節省。
+
+支援的指令使用 `rtk <command>`；不支援或需完整原文時用 `rtk proxy <command>`。`proxy` 不過濾輸出。
 
 ## Meta 指令（永遠直接用 rtk）
 

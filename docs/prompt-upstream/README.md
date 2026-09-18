@@ -34,3 +34,18 @@ Caveman 與 Ponytail 沿用既有紀錄中的 `djpken` repos，ADHD 使用使用
 ## 後續紀錄
 
 每次審閱記錄來源、舊／新 commit、差異項目、採納／保留／暫緩與理由。全部處理完成才更新該來源的追蹤基準；操作步驟見 `prompt/README.md`。
+
+## 2026-09-17：KEN-14／KEN-19 本地指示精簡
+
+這次修改本地版本，未重新同步 upstream，所有 upstream commit、原文快照與 SHA-256 保持原有追蹤基準。
+
+| 來源 | 本地處理 |
+| --- | --- |
+| ADHD | 合併重複的格式與送出前檢查說明，移除示範表；保留繁中、technical literals、自主完成、錯誤證據、必要細節與安全界線。 |
+| Caveman | 保留 ultra 與 Auto-Clarity，合併重複壓縮規則與範例；釐清明確語言指示優先，不以 ultra 蓋過必要驗證。 |
+| Ponytail | 保留 YAGNI 階梯、簡化註解、最小可執行檢查與安全界線；壓縮重複的哲學說明，明示必要驗證結果可超過三行。 |
+| RTK | 移除未在 ADE 實測的固定節省比例，區分支援的過濾指令與不過濾的 `proxy`；工具自報 savings 不代表總任務 token。 |
+| codebase-memory-mcp | 精確搜尋改用 `rg`，補足索引新鮮度、分頁、涵蓋範圍、證據層級與降級規則，取代過時的「grep 或 Explore agent」捷徑。 |
+| 1Password CLI | 未修改。 |
+
+兩份合併檔由既有 build 產生。現行 Codex 個人 AGENTS.md 並非直接載入這份合併檔，因此個人預設的變更另受實測門檻約束。

@@ -1,0 +1,714 @@
+{
+  "revision": "ef64277cefd62245556d96c23c1171d4743f0d4e",
+  "model": "gpt-6-astra",
+  "reasoning": "medium",
+  "codex_version": "codex-cli 0.154.0",
+  "config_sha256": "75f14f018b56d83d21855630edc59a15624bdc85fc3c0b2237c85c510ab2387f",
+  "repeats": 3,
+  "overlay_sha256": {
+    "AGENTS.md": "9f5c991307bf1b8b0370112488fdbb7248c632aa79ad1daafa5b8d505a821232",
+    "docs/agents/code-search.md": "e90391a1497baa178d25d9ccb85e93551d8106a31392c0de94043192e3b5ad3b",
+    "docs/agents/workflow-pack.md": "4f8fea32ca64c45ee12804b191d6a939d166a6f54721d7d020852f508f057a18"
+  },
+  "scope": "repository instructions; inherited global instructions unchanged; MCP disabled in all arms",
+  "trials": [
+    {
+      "variant": "baseline",
+      "repeat": 0,
+      "turns": [
+        {
+          "usage": {
+            "input_tokens": 160414,
+            "cached_input_tokens": 119552,
+            "output_tokens": 644
+          },
+          "tool_calls": 5
+        },
+        {
+          "usage": {
+            "input_tokens": 283240,
+            "cached_input_tokens": 200704,
+            "output_tokens": 1212
+          },
+          "tool_calls": 2
+        },
+        {
+          "usage": {
+            "input_tokens": 408701,
+            "cached_input_tokens": 324608,
+            "output_tokens": 1829
+          },
+          "tool_calls": 2
+        }
+      ],
+      "quality_pass": true,
+      "metrics_complete": true,
+      "seconds": 102.86623560870066,
+      "lookup_checks": {
+        "headroom_version": true,
+        "headroom_enabled": true,
+        "config_target": true,
+        "export": true,
+        "namespace": true,
+        "failures": true,
+        "fallback_disclosed": true,
+        "ade/hosts.py": true,
+        "ade/core.py": true
+      },
+      "code_pass": true,
+      "scope_pass": true,
+      "usage": {
+        "input_tokens": 408701,
+        "cached_input_tokens": 324608,
+        "output_tokens": 1829
+      },
+      "additional_scope_pass": true,
+      "stdlib_pass": true,
+      "tool_calls": 9
+    },
+    {
+      "variant": "context",
+      "repeat": 0,
+      "turns": [
+        {
+          "usage": {
+            "input_tokens": 160452,
+            "cached_input_tokens": 119424,
+            "output_tokens": 654
+          },
+          "tool_calls": 5
+        },
+        {
+          "usage": {
+            "input_tokens": 285175,
+            "cached_input_tokens": 240896,
+            "output_tokens": 1382
+          },
+          "tool_calls": 4
+        },
+        {
+          "usage": {
+            "input_tokens": 415887,
+            "cached_input_tokens": 369920,
+            "output_tokens": 2108
+          },
+          "tool_calls": 2
+        }
+      ],
+      "quality_pass": true,
+      "metrics_complete": true,
+      "seconds": 110.69897975819185,
+      "lookup_checks": {
+        "headroom_version": true,
+        "headroom_enabled": true,
+        "config_target": true,
+        "export": true,
+        "namespace": true,
+        "failures": true,
+        "fallback_disclosed": true,
+        "ade/hosts.py": true,
+        "ade/core.py": true
+      },
+      "code_pass": true,
+      "scope_pass": true,
+      "usage": {
+        "input_tokens": 415887,
+        "cached_input_tokens": 369920,
+        "output_tokens": 2108
+      },
+      "additional_scope_pass": true,
+      "stdlib_pass": true,
+      "tool_calls": 11
+    },
+    {
+      "variant": "instructions",
+      "repeat": 0,
+      "turns": [
+        {
+          "usage": {
+            "input_tokens": 128261,
+            "cached_input_tokens": 87808,
+            "output_tokens": 596
+          },
+          "tool_calls": 4
+        },
+        {
+          "usage": {
+            "input_tokens": 291884,
+            "cached_input_tokens": 220544,
+            "output_tokens": 1562
+          },
+          "tool_calls": 3
+        },
+        {
+          "usage": {
+            "input_tokens": 418110,
+            "cached_input_tokens": 343552,
+            "output_tokens": 2292
+          },
+          "tool_calls": 2
+        }
+      ],
+      "quality_pass": true,
+      "metrics_complete": true,
+      "seconds": 116.91259730281308,
+      "lookup_checks": {
+        "headroom_version": true,
+        "headroom_enabled": true,
+        "config_target": true,
+        "export": true,
+        "namespace": true,
+        "failures": true,
+        "fallback_disclosed": true,
+        "ade/hosts.py": true,
+        "ade/core.py": true
+      },
+      "code_pass": true,
+      "scope_pass": true,
+      "usage": {
+        "input_tokens": 418110,
+        "cached_input_tokens": 343552,
+        "output_tokens": 2292
+      },
+      "additional_scope_pass": true,
+      "stdlib_pass": true,
+      "tool_calls": 9
+    },
+    {
+      "variant": "combined",
+      "repeat": 0,
+      "turns": [
+        {
+          "usage": {
+            "input_tokens": 127939,
+            "cached_input_tokens": 98944,
+            "output_tokens": 574
+          },
+          "tool_calls": 7
+        },
+        {
+          "usage": {
+            "input_tokens": 290169,
+            "cached_input_tokens": 258944,
+            "output_tokens": 1446
+          },
+          "tool_calls": 4
+        },
+        {
+          "usage": {
+            "input_tokens": 415128,
+            "cached_input_tokens": 341376,
+            "output_tokens": 2117
+          },
+          "tool_calls": 2
+        }
+      ],
+      "quality_pass": true,
+      "metrics_complete": true,
+      "seconds": 117.81372773600742,
+      "lookup_checks": {
+        "headroom_version": true,
+        "headroom_enabled": true,
+        "config_target": true,
+        "export": true,
+        "namespace": true,
+        "failures": true,
+        "fallback_disclosed": true,
+        "ade/hosts.py": true,
+        "ade/core.py": true
+      },
+      "code_pass": true,
+      "scope_pass": true,
+      "usage": {
+        "input_tokens": 415128,
+        "cached_input_tokens": 341376,
+        "output_tokens": 2117
+      },
+      "additional_scope_pass": true,
+      "stdlib_pass": true,
+      "tool_calls": 13
+    },
+    {
+      "variant": "context",
+      "repeat": 1,
+      "turns": [
+        {
+          "usage": {
+            "input_tokens": 160296,
+            "cached_input_tokens": 130560,
+            "output_tokens": 642
+          },
+          "tool_calls": 5
+        },
+        {
+          "usage": {
+            "input_tokens": 284932,
+            "cached_input_tokens": 211712,
+            "output_tokens": 1291
+          },
+          "tool_calls": 4
+        },
+        {
+          "usage": {
+            "input_tokens": 415873,
+            "cached_input_tokens": 341120,
+            "output_tokens": 1973
+          },
+          "tool_calls": 2
+        }
+      ],
+      "quality_pass": true,
+      "metrics_complete": true,
+      "seconds": 111.63371598068625,
+      "lookup_checks": {
+        "headroom_version": true,
+        "headroom_enabled": true,
+        "config_target": true,
+        "export": true,
+        "namespace": true,
+        "failures": true,
+        "fallback_disclosed": true,
+        "ade/hosts.py": true,
+        "ade/core.py": true
+      },
+      "code_pass": true,
+      "scope_pass": true,
+      "usage": {
+        "input_tokens": 415873,
+        "cached_input_tokens": 341120,
+        "output_tokens": 1973
+      },
+      "additional_scope_pass": true,
+      "stdlib_pass": true,
+      "tool_calls": 11
+    },
+    {
+      "variant": "instructions",
+      "repeat": 1,
+      "turns": [
+        {
+          "usage": {
+            "input_tokens": 127705,
+            "cached_input_tokens": 88064,
+            "output_tokens": 557
+          },
+          "tool_calls": 6
+        },
+        {
+          "usage": {
+            "input_tokens": 288168,
+            "cached_input_tokens": 246144,
+            "output_tokens": 1448
+          },
+          "tool_calls": 3
+        },
+        {
+          "usage": {
+            "input_tokens": 411807,
+            "cached_input_tokens": 368256,
+            "output_tokens": 2113
+          },
+          "tool_calls": 2
+        }
+      ],
+      "quality_pass": true,
+      "metrics_complete": true,
+      "seconds": 111.80427695903927,
+      "lookup_checks": {
+        "headroom_version": true,
+        "headroom_enabled": true,
+        "config_target": true,
+        "export": true,
+        "namespace": true,
+        "failures": true,
+        "fallback_disclosed": true,
+        "ade/hosts.py": true,
+        "ade/core.py": true
+      },
+      "code_pass": true,
+      "scope_pass": true,
+      "usage": {
+        "input_tokens": 411807,
+        "cached_input_tokens": 368256,
+        "output_tokens": 2113
+      },
+      "additional_scope_pass": true,
+      "stdlib_pass": true,
+      "tool_calls": 11
+    },
+    {
+      "variant": "combined",
+      "repeat": 1,
+      "turns": [
+        {
+          "usage": {
+            "input_tokens": 102881,
+            "cached_input_tokens": 75520,
+            "output_tokens": 490
+          },
+          "tool_calls": 3
+        },
+        {
+          "usage": {
+            "input_tokens": 214525,
+            "cached_input_tokens": 184832,
+            "output_tokens": 1427
+          },
+          "tool_calls": 3
+        },
+        {
+          "usage": {
+            "input_tokens": 301664,
+            "cached_input_tokens": 270464,
+            "output_tokens": 2108
+          },
+          "tool_calls": 2
+        }
+      ],
+      "quality_pass": true,
+      "metrics_complete": true,
+      "seconds": 112.77231220947579,
+      "lookup_checks": {
+        "headroom_version": true,
+        "headroom_enabled": true,
+        "config_target": true,
+        "export": true,
+        "namespace": true,
+        "failures": true,
+        "fallback_disclosed": true,
+        "ade/hosts.py": true,
+        "ade/core.py": true
+      },
+      "code_pass": true,
+      "scope_pass": true,
+      "usage": {
+        "input_tokens": 301664,
+        "cached_input_tokens": 270464,
+        "output_tokens": 2108
+      },
+      "additional_scope_pass": true,
+      "stdlib_pass": true,
+      "tool_calls": 8
+    },
+    {
+      "variant": "baseline",
+      "repeat": 1,
+      "turns": [
+        {
+          "usage": {
+            "input_tokens": 160769,
+            "cached_input_tokens": 119680,
+            "output_tokens": 643
+          },
+          "tool_calls": 5
+        },
+        {
+          "usage": {
+            "input_tokens": 284235,
+            "cached_input_tokens": 241408,
+            "output_tokens": 1257
+          },
+          "tool_calls": 3
+        },
+        {
+          "usage": {
+            "input_tokens": 410486,
+            "cached_input_tokens": 366080,
+            "output_tokens": 1923
+          },
+          "tool_calls": 2
+        }
+      ],
+      "quality_pass": true,
+      "metrics_complete": true,
+      "seconds": 116.00348771968856,
+      "lookup_checks": {
+        "headroom_version": true,
+        "headroom_enabled": true,
+        "config_target": true,
+        "export": true,
+        "namespace": true,
+        "failures": true,
+        "fallback_disclosed": true,
+        "ade/hosts.py": true,
+        "ade/core.py": true
+      },
+      "code_pass": true,
+      "scope_pass": true,
+      "usage": {
+        "input_tokens": 410486,
+        "cached_input_tokens": 366080,
+        "output_tokens": 1923
+      },
+      "additional_scope_pass": true,
+      "stdlib_pass": true,
+      "tool_calls": 10
+    },
+    {
+      "variant": "instructions",
+      "repeat": 2,
+      "turns": [
+        {
+          "usage": {
+            "input_tokens": 126475,
+            "cached_input_tokens": 87680,
+            "output_tokens": 553
+          },
+          "tool_calls": 6
+        },
+        {
+          "usage": {
+            "input_tokens": 283734,
+            "cached_input_tokens": 242688,
+            "output_tokens": 1392
+          },
+          "tool_calls": 3
+        },
+        {
+          "usage": {
+            "input_tokens": 404874,
+            "cached_input_tokens": 322688,
+            "output_tokens": 2042
+          },
+          "tool_calls": 2
+        }
+      ],
+      "quality_pass": true,
+      "metrics_complete": true,
+      "seconds": 119.97056622290984,
+      "lookup_checks": {
+        "headroom_version": true,
+        "headroom_enabled": true,
+        "config_target": true,
+        "export": true,
+        "namespace": true,
+        "failures": true,
+        "fallback_disclosed": true,
+        "ade/hosts.py": true,
+        "ade/core.py": true
+      },
+      "code_pass": true,
+      "scope_pass": true,
+      "usage": {
+        "input_tokens": 404874,
+        "cached_input_tokens": 322688,
+        "output_tokens": 2042
+      },
+      "additional_scope_pass": true,
+      "stdlib_pass": true,
+      "tool_calls": 11
+    },
+    {
+      "variant": "combined",
+      "repeat": 2,
+      "turns": [
+        {
+          "usage": {
+            "input_tokens": 126782,
+            "cached_input_tokens": 87808,
+            "output_tokens": 510
+          },
+          "tool_calls": 5
+        },
+        {
+          "usage": {
+            "input_tokens": 284534,
+            "cached_input_tokens": 243200,
+            "output_tokens": 1404
+          },
+          "tool_calls": 3
+        },
+        {
+          "usage": {
+            "input_tokens": 406182,
+            "cached_input_tokens": 323456,
+            "output_tokens": 2077
+          },
+          "tool_calls": 2
+        }
+      ],
+      "quality_pass": true,
+      "metrics_complete": true,
+      "seconds": 132.04141681687906,
+      "lookup_checks": {
+        "headroom_version": true,
+        "headroom_enabled": true,
+        "config_target": true,
+        "export": true,
+        "namespace": true,
+        "failures": true,
+        "fallback_disclosed": true,
+        "ade/hosts.py": true,
+        "ade/core.py": true
+      },
+      "code_pass": true,
+      "scope_pass": true,
+      "usage": {
+        "input_tokens": 406182,
+        "cached_input_tokens": 323456,
+        "output_tokens": 2077
+      },
+      "additional_scope_pass": true,
+      "stdlib_pass": true,
+      "tool_calls": 10
+    },
+    {
+      "variant": "baseline",
+      "repeat": 2,
+      "turns": [
+        {
+          "usage": {
+            "input_tokens": 176789,
+            "cached_input_tokens": 133632,
+            "output_tokens": 706
+          },
+          "tool_calls": 7
+        },
+        {
+          "usage": {
+            "input_tokens": 306224,
+            "cached_input_tokens": 261376,
+            "output_tokens": 1293
+          },
+          "tool_calls": 2
+        },
+        {
+          "usage": {
+            "input_tokens": 438356,
+            "cached_input_tokens": 392064,
+            "output_tokens": 1944
+          },
+          "tool_calls": 2
+        }
+      ],
+      "quality_pass": true,
+      "metrics_complete": true,
+      "seconds": 136.83534085284919,
+      "lookup_checks": {
+        "headroom_version": true,
+        "headroom_enabled": true,
+        "config_target": true,
+        "export": true,
+        "namespace": true,
+        "failures": true,
+        "fallback_disclosed": true,
+        "ade/hosts.py": true,
+        "ade/core.py": true
+      },
+      "code_pass": true,
+      "scope_pass": true,
+      "usage": {
+        "input_tokens": 438356,
+        "cached_input_tokens": 392064,
+        "output_tokens": 1944
+      },
+      "additional_scope_pass": true,
+      "stdlib_pass": true,
+      "tool_calls": 11
+    },
+    {
+      "variant": "context",
+      "repeat": 2,
+      "turns": [
+        {
+          "usage": {
+            "input_tokens": 160801,
+            "cached_input_tokens": 119680,
+            "output_tokens": 668
+          },
+          "tool_calls": 5
+        },
+        {
+          "usage": {
+            "input_tokens": 284238,
+            "cached_input_tokens": 201216,
+            "output_tokens": 1236
+          },
+          "tool_calls": 2
+        },
+        {
+          "usage": {
+            "input_tokens": 410311,
+            "cached_input_tokens": 325760,
+            "output_tokens": 1863
+          },
+          "tool_calls": 2
+        }
+      ],
+      "quality_pass": true,
+      "metrics_complete": true,
+      "seconds": 126.79964201245457,
+      "lookup_checks": {
+        "headroom_version": true,
+        "headroom_enabled": true,
+        "config_target": true,
+        "export": true,
+        "namespace": true,
+        "failures": true,
+        "fallback_disclosed": true,
+        "ade/hosts.py": true,
+        "ade/core.py": true
+      },
+      "code_pass": true,
+      "scope_pass": true,
+      "usage": {
+        "input_tokens": 410311,
+        "cached_input_tokens": 325760,
+        "output_tokens": 1863
+      },
+      "additional_scope_pass": true,
+      "stdlib_pass": true,
+      "tool_calls": 9
+    }
+  ],
+  "decision": {
+    "variants": {
+      "baseline": {
+        "complete": true,
+        "median_tokens": 412409,
+        "median_seconds": 116.00348771968856,
+        "median_cached_input": 366080
+      },
+      "context": {
+        "complete": true,
+        "median_tokens": 417846,
+        "median_seconds": 111.63371598068625,
+        "median_cached_input": 341120,
+        "token_reduction": -0.013183514423787956,
+        "time_ratio": 0.9623306865603778
+      },
+      "instructions": {
+        "complete": true,
+        "median_tokens": 413920,
+        "median_seconds": 116.91259730281308,
+        "median_cached_input": 343552,
+        "token_reduction": -0.0036638385680234364,
+        "time_ratio": 1.0078369159496419
+      },
+      "combined": {
+        "complete": true,
+        "median_tokens": 408259,
+        "median_seconds": 117.81372773600742,
+        "median_cached_input": 323456,
+        "token_reduction": 0.010062825981004275,
+        "time_ratio": 1.0156050481921124
+      }
+    },
+    "eligible_variant": null,
+    "personal_defaults_changed": false
+  },
+  "effective_configuration_unchanged": true,
+  "effective_configuration_check": "Removing only trial project registrations and normalizing trailing whitespace reproduces the initial config SHA-256.",
+  "completed_on": "2026-09-18",
+  "cleanup": {
+    "temporary_project_trust_entries_removed": 14,
+    "other_config_preserved": true,
+    "context_management_default": "unchanged (off)"
+  },
+  "experiment_usage_total": {
+    "input_tokens": 4857379,
+    "cached_input_tokens": 4089344,
+    "output_tokens": 24389,
+    "total_tokens": 4881768
+  }
+}

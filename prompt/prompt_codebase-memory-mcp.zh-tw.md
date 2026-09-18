@@ -1,26 +1,9 @@
-# 程式碼搜尋與導覽：結構化查詢 vs 語意查詢 vs 精確比對
+# 程式碼搜尋與導覽
 
-搜尋程式碼時，依查詢類型選對工具：
-
-- **精確 / 關鍵字搜尋**（function 名稱、變數、字串、file path）：
-  用 Bash 的 `grep` 或 Explore agent。
-
-- **結構化 / 關聯性查詢**（誰呼叫 X、X 依賴什麼、改 X 會壞什麼、call chain、import graph）：
-  **必須**先用 `mcp__codebase-memory-mcp__*` 工具。依賴或呼叫關係的問題不要手動 grep 或讀檔案。
-
-## codebase-memory-mcp 工具（結構化查詢）
-
-| 工具                                          | 使用時機                                           |
-| --------------------------------------------- | -------------------------------------------------- |
-| `mcp__codebase-memory-mcp__search_graph`     | 依名稱或 label 找 function/class/route            |
-| `mcp__codebase-memory-mcp__trace_path`       | 追蹤 call chain、data flow、跨 service 路徑        |
-| `mcp__codebase-memory-mcp__get_code_snippet` | 取得指定 symbol 的精確原始碼                       |
-| `mcp__codebase-memory-mcp__query_graph`      | 對程式碼圖跑複雜的 Cypher 查詢                     |
-| `mcp__codebase-memory-mcp__get_architecture` | 專案層級的架構總覽                                 |
-| `mcp__codebase-memory-mcp__search_code`      | 圖譜輔助的文字 / pattern 搜尋                      |
-| `mcp__codebase-memory-mcp__index_repository` | 建立或重新整理結構索引                             |
-| `mcp__codebase-memory-mcp__index_status`     | 確認索引是否為最新狀態                             |
-
-## 合併使用模式
-
-深度分析時串接兩者：先用 **codebase-memory-mcp** 畫出結構範圍（呼叫者、影響範圍）。
+- 精確文字、符號名稱、路徑、錯誤訊息、設定與非程式碼檔案使用 `rg` / `rg --files`。只有大範圍且可獨立調查時才委派探索。
+- 結構、呼叫者／被呼叫者、相依、呼叫鏈與變更影響優先使用 codebase-memory-mcp。工作階段開始、compaction 後及結構查詢前，用 `list_projects` 或 `index_status` 確認專案與索引版本；不存在或過期時 `index_repository` 一次再重試。
+- 依序用 `search_graph` 找符號、`trace_path` 查關聯、`get_code_snippet` 讀原始碼、`check_index_coverage` 驗證涵蓋範圍；複雜查詢用 `query_graph`，高階摘要用 `get_architecture`。檢查並讀完所需分頁。
+- 預設 Verify：結論須有圖譜、相關方向呼叫鏈、原始碼與完整分頁證據。Scout 僅暫定正向確認；Auditor 在限定範圍核對雙向關聯與完整證據。
+- 所有圖譜證據路徑都查 `check_index_coverage`；否定或完整性結論另查相應範圍。遇 partial、skipped、excluded、stale、pending 或 unknown，先補讀／搜尋缺口。無記錄缺口也不保證完整。
+- MCP 不可用、索引無法建立或結果不足時，才改用語言伺服器、建置工具或文字搜尋，明示降級限制。
+- 委派前由父代理確認圖譜與涵蓋範圍；交付證據層級、專案／索引版本、範圍、分頁狀態、完整符號與路徑、呼叫鏈、缺口與補查、未解問題。子代理不得假設有 MCP 存取權；無工具時用交付證據補讀原始碼並揭露限制。

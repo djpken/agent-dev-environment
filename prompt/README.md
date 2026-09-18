@@ -8,6 +8,8 @@
 
 Caveman 常駐，保留現有 ultra 風格。合併版保留既有五份內容與順序，最後加入 1Password CLI 使用政策。
 
+2026-09-17 精簡重複說明與範例，保留上述風格與必要驗證。合併使用時，ADHD 的明確語言規則優先於 Caveman 的語言跟隨預設；Caveman 只壓縮語氣，Ponytail 只約束實作範圍。精簡不代表已在個人 Codex 載入，也不能用檔案字數推算整段任務的 token 節省。實測與套用決策見 [Codex 效率評估](../docs/research/codex-efficiency.md)。
+
 ## 更新流程
 
 `sources.json` 記錄來源、固定版本、原文快照位置與合併順序。各份 `prompt_*.md` 是本地改編內容；兩份合併檔由腳本產生，修改各份內容後重新產生。
