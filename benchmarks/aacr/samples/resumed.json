@@ -1,0 +1,411 @@
+{
+  "baseline": {
+    "all_attempts": {
+      "count": 1,
+      "known_tokens": 180,
+      "known_usage_count": 1,
+      "known_wall_seconds": 0.31647911109030247,
+      "unknown_duration_count": 0,
+      "unknown_usage_count": 0
+    },
+    "avg_time": 0.31647911109030247,
+    "avg_tokens": 180,
+    "clone_seconds": 0.07481547119095922,
+    "completed": 1,
+    "failed": 0,
+    "invalid_output": 0,
+    "line_f1": 0.0,
+    "line_precision": 0.0,
+    "line_recall": 0.0,
+    "missing": 0,
+    "official_summary": {
+      "avg_duration_seconds": 0.0,
+      "avg_input_tokens": 0,
+      "avg_output_tokens": 0,
+      "candidate_instances": 1,
+      "evaluated_instances": 1,
+      "expected_notes": 1,
+      "generated_notes": 0,
+      "line_f1": 0.0,
+      "line_match_rate": 0.0,
+      "line_recall_rate": 0.0,
+      "matched_line_notes": 0,
+      "matched_semantic_notes": 0,
+      "missing_instances": 0,
+      "semantic_f1": 0.0,
+      "semantic_match_rate": 0.0,
+      "semantic_recall_rate": 0.0,
+      "total_duration_seconds": 0,
+      "total_input_tokens": 0,
+      "total_instances": 1,
+      "total_output_tokens": 0,
+      "total_tokens": 0
+    },
+    "precision": 0.0,
+    "recall": 0.0,
+    "requested": 1,
+    "semantic_f1": 0.0,
+    "timed_out": 0,
+    "usage_coverage": {
+      "completed": 1,
+      "known": 1,
+      "requested": 1
+    }
+  },
+  "bootstrap": {
+    "interval": null,
+    "reason": "fewer than two paired PRs",
+    "seed": 7,
+    "unit": "PR"
+  },
+  "candidate": {
+    "all_attempts": {
+      "count": 2,
+      "known_tokens": 187,
+      "known_usage_count": 2,
+      "known_wall_seconds": 0.533941222820431,
+      "unknown_duration_count": 0,
+      "unknown_usage_count": 0
+    },
+    "avg_time": 0.3181233359500766,
+    "avg_tokens": 180,
+    "clone_seconds": 0.14706638036295772,
+    "completed": 1,
+    "failed": 0,
+    "invalid_output": 0,
+    "line_f1": 1.0,
+    "line_precision": 1.0,
+    "line_recall": 1.0,
+    "missing": 0,
+    "official_summary": {
+      "avg_duration_seconds": 0.0,
+      "avg_input_tokens": 0,
+      "avg_output_tokens": 0,
+      "candidate_instances": 1,
+      "evaluated_instances": 1,
+      "expected_notes": 1,
+      "generated_notes": 1,
+      "line_f1": 1.0,
+      "line_match_rate": 1.0,
+      "line_recall_rate": 1.0,
+      "matched_line_notes": 1,
+      "matched_semantic_notes": 1,
+      "missing_instances": 0,
+      "semantic_f1": 1.0,
+      "semantic_match_rate": 1.0,
+      "semantic_recall_rate": 1.0,
+      "total_duration_seconds": 0,
+      "total_input_tokens": 0,
+      "total_instances": 1,
+      "total_output_tokens": 0,
+      "total_tokens": 0
+    },
+    "precision": 1.0,
+    "recall": 1.0,
+    "requested": 1,
+    "semantic_f1": 1.0,
+    "timed_out": 0,
+    "usage_coverage": {
+      "completed": 1,
+      "known": 1,
+      "requested": 1
+    }
+  },
+  "conclusion": "offline pipeline evidence only; no model quality or merge verdict",
+  "dataset": {
+    "cases_hash": "b7f080f21701736a206cb433eb15db183e825b1ae6b3eaaecd62c26a8a1740bf",
+    "kind": "fixture",
+    "seed": 7,
+    "sha256": "bf10482e0d56bb5ae478653460caf99d081e29336ac84b89f3341d0613184018",
+    "source": "local fixture"
+  },
+  "delta": {
+    "avg_time": {
+      "absolute": 0.0016442248597741127,
+      "ratio": 1.005195366146314
+    },
+    "avg_tokens": {
+      "absolute": 0,
+      "ratio": 1.0
+    },
+    "precision": {
+      "absolute": 1.0,
+      "percentage_points": 100.0
+    },
+    "recall": {
+      "absolute": 1.0,
+      "percentage_points": 100.0
+    },
+    "semantic_f1": {
+      "absolute": 1.0,
+      "percentage_points": 100.0
+    }
+  },
+  "details": [
+    {
+      "axes": {
+        "Spec": [],
+        "Standards": []
+      },
+      "case_id": "example__synthetic@f2e67e2",
+      "classification": "unavailable",
+      "findings_hash": "0be4a5c23c8c8f1c47af1911c562adeea39733dfa56b9a762d8dbc9c620e4639",
+      "judge_round": 0,
+      "key": "0",
+      "matches": [
+        {
+          "comments": [
+            {
+              "from_line": 1,
+              "line_match": false,
+              "matched_note": "",
+              "note": "Validate user input",
+              "path": "app.py",
+              "semantic_match": false,
+              "side": "right",
+              "to_line": 1
+            }
+          ],
+          "instance_id": "example__synthetic@f2e67e2",
+          "repo": "example/synthetic"
+        }
+      ],
+      "reviewer_round": 0,
+      "side": "baseline",
+      "summary": {
+        "avg_duration_seconds": 0.32,
+        "avg_input_tokens": 0,
+        "avg_output_tokens": 0,
+        "candidate_instances": 1,
+        "evaluated_instances": 1,
+        "expected_notes": 1,
+        "generated_notes": 0,
+        "line_f1": 0.0,
+        "line_match_rate": 0.0,
+        "line_recall_rate": 0.0,
+        "matched_line_notes": 0,
+        "matched_semantic_notes": 0,
+        "missing_instances": 0,
+        "semantic_f1": 0.0,
+        "semantic_match_rate": 0.0,
+        "semantic_recall_rate": 0.0,
+        "total_duration_seconds": 0.32,
+        "total_input_tokens": 0,
+        "total_instances": 1,
+        "total_output_tokens": 0,
+        "total_tokens": 0
+      }
+    },
+    {
+      "axes": {
+        "Spec": [],
+        "Standards": [
+          {
+            "description": "",
+            "end_line": 1,
+            "file": "app.py",
+            "start_line": 1,
+            "summary": "Validate user input"
+          }
+        ]
+      },
+      "case_id": "example__synthetic@f2e67e2",
+      "classification": "unavailable",
+      "findings_hash": "f472f8257a3f031516e5e2e76cd72503c7781f6c76fd431af0ef2096e289a60d",
+      "judge_round": 0,
+      "key": "0",
+      "matches": [
+        {
+          "comments": [
+            {
+              "from_line": 1,
+              "line_match": true,
+              "matched_note": "Validate user input",
+              "note": "Validate user input",
+              "path": "app.py",
+              "semantic_match": true,
+              "side": "right",
+              "to_line": 1
+            }
+          ],
+          "instance_id": "example__synthetic@f2e67e2",
+          "repo": "example/synthetic"
+        }
+      ],
+      "reviewer_round": 0,
+      "side": "candidate",
+      "summary": {
+        "avg_duration_seconds": 0.32,
+        "avg_input_tokens": 0,
+        "avg_output_tokens": 0,
+        "candidate_instances": 1,
+        "evaluated_instances": 1,
+        "expected_notes": 1,
+        "generated_notes": 1,
+        "line_f1": 1.0,
+        "line_match_rate": 1.0,
+        "line_recall_rate": 1.0,
+        "matched_line_notes": 1,
+        "matched_semantic_notes": 1,
+        "missing_instances": 0,
+        "semantic_f1": 1.0,
+        "semantic_match_rate": 1.0,
+        "semantic_recall_rate": 1.0,
+        "total_duration_seconds": 0.32,
+        "total_input_tokens": 0,
+        "total_instances": 1,
+        "total_output_tokens": 0,
+        "total_tokens": 0
+      }
+    }
+  ],
+  "evaluation_id": "ef09c2befe4a4cdba4c3078725337155",
+  "experiment_elapsed_seconds": 2.566296224948019,
+  "experiment_id": "88410794e0004fd19d10e8011b4ce4d4",
+  "judge": {
+    "model": "fake-independent-judge",
+    "reasoning_effort": "high"
+  },
+  "judge_seconds": 0.0049090697430074215,
+  "judge_usage": {
+    "requests": 1,
+    "status": "mock-no-model",
+    "total_tokens": null
+  },
+  "limitations": [
+    "Mock output is smoke-only; real model, skill loading and all child usage need pilot validation.",
+    "Spec uses commit subjects; original requirements are limited.",
+    "Same-model reviewer/Judge may share bias. Tokens are not billing amounts.",
+    "Small samples and single rounds cannot establish significance.",
+    "Unknown usage forbids complete cost-improvement claims.",
+    "Incomplete runs are diagnostic only; official summaries omit missing results.",
+    "Classification unavailable in the official converted schema."
+  ],
+  "paired": [
+    {
+      "baseline": {
+        "line_f1": 0.0,
+        "line_precision": 0.0,
+        "line_recall": 0.0,
+        "official_summary": {
+          "avg_duration_seconds": 0.0,
+          "avg_input_tokens": 0,
+          "avg_output_tokens": 0,
+          "candidate_instances": 1,
+          "evaluated_instances": 1,
+          "expected_notes": 1,
+          "generated_notes": 0,
+          "line_f1": 0.0,
+          "line_match_rate": 0.0,
+          "line_recall_rate": 0.0,
+          "matched_line_notes": 0,
+          "matched_semantic_notes": 0,
+          "missing_instances": 0,
+          "semantic_f1": 0.0,
+          "semantic_match_rate": 0.0,
+          "semantic_recall_rate": 0.0,
+          "total_duration_seconds": 0,
+          "total_input_tokens": 0,
+          "total_instances": 1,
+          "total_output_tokens": 0,
+          "total_tokens": 0
+        },
+        "precision": 0.0,
+        "recall": 0.0,
+        "semantic_f1": 0.0
+      },
+      "candidate": {
+        "line_f1": 1.0,
+        "line_precision": 1.0,
+        "line_recall": 1.0,
+        "official_summary": {
+          "avg_duration_seconds": 0.0,
+          "avg_input_tokens": 0,
+          "avg_output_tokens": 0,
+          "candidate_instances": 1,
+          "evaluated_instances": 1,
+          "expected_notes": 1,
+          "generated_notes": 1,
+          "line_f1": 1.0,
+          "line_match_rate": 1.0,
+          "line_recall_rate": 1.0,
+          "matched_line_notes": 1,
+          "matched_semantic_notes": 1,
+          "missing_instances": 0,
+          "semantic_f1": 1.0,
+          "semantic_match_rate": 1.0,
+          "semantic_recall_rate": 1.0,
+          "total_duration_seconds": 0,
+          "total_input_tokens": 0,
+          "total_instances": 1,
+          "total_output_tokens": 0,
+          "total_tokens": 0
+        },
+        "precision": 1.0,
+        "recall": 1.0,
+        "semantic_f1": 1.0
+      },
+      "case_id": "example__synthetic@f2e67e2",
+      "regression": false
+    }
+  ],
+  "report_only": true,
+  "reviewer": {
+    "model": "gpt-5.6-luna",
+    "reasoning_effort": "ultra"
+  },
+  "schema_version": 1,
+  "setup_seconds": 0.17908084904775023,
+  "smoke_only": true,
+  "status": "complete",
+  "versions": {
+    "baseline": {
+      "commit": "de21d126737982f61e102ba526213a0e00127f8b",
+      "digest": "95b0d509afb5ac78ca4da2ce55261c9b820fc24f70383822ee45bc546f12582b",
+      "excluded": {},
+      "included": {
+        "app.py": {
+          "executable": false,
+          "sha256": "585c93666fcb046b7b264d3fa73202aa2a38254ae82a4b3ba19e873c2d5a9886"
+        },
+        "fake-review.json": {
+          "executable": false,
+          "sha256": "dfc0f95a7821fb8246aac96523736e141a77ff7ff65d6ad42ff8a86e06f435c4"
+        },
+        "skills/base/SKILL.md": {
+          "executable": false,
+          "sha256": "44d2229d01dd4f089c397f4113f776aca4e0e248644b7e69cee02d0fb868d0e1"
+        },
+        "skills/code-review/SKILL.md": {
+          "executable": false,
+          "sha256": "6aaae159ec8ad9895642b187e4accabc853833913f0532f34ce93deeb462ffed"
+        }
+      },
+      "kind": "commit"
+    },
+    "candidate": {
+      "commit": "f2e67e2938d7c428add7111e66ef2d3d2e5de22b",
+      "digest": "404803424291ca3405cfd94c29c20ec09e0244e9b4f392327f7b807d10d8386d",
+      "excluded": {},
+      "included": {
+        "app.py": {
+          "executable": false,
+          "sha256": "826c32a3a477121fc1c151be5dbc3ceddebc45a178bd900f8af9e8ab73d1e46a"
+        },
+        "fake-review.json": {
+          "executable": false,
+          "sha256": "eb5375ab6d01dc62d4e133ec727ff76ba9714e1836f705d45242d1325d88b3a8"
+        },
+        "skills/base/SKILL.md": {
+          "executable": false,
+          "sha256": "44d2229d01dd4f089c397f4113f776aca4e0e248644b7e69cee02d0fb868d0e1"
+        },
+        "skills/code-review/SKILL.md": {
+          "executable": false,
+          "sha256": "6aaae159ec8ad9895642b187e4accabc853833913f0532f34ce93deeb462ffed"
+        }
+      },
+      "kind": "workspace"
+    }
+  }
+}

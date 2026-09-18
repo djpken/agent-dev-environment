@@ -1,0 +1,21 @@
+{
+  "mode": "fake",
+  "workflow_repo": "/absolute/path/to/workflow/repo",
+  "baseline": "FULL_BASELINE_COMMIT",
+  "candidate": "workspace",
+  "untracked": [],
+  "required_files": {"baseline": [], "candidate": []},
+  "dataset": {
+    "path": "/absolute/path/to/positive_samples.json",
+    "kind": "official",
+    "sha256": "d8683cb240249bc4e0aff6428802bdffa7b7573ace600552cab1cd0cb7e905c9",
+    "repositories": {"owner/repo": "/absolute/path/to/local/pr/repo"}
+  },
+  "reviewer": {"model": "gpt-5.6-luna", "reasoning_effort": "ultra"},
+  "judge": {"model": "gpt-5.6-luna", "reasoning_effort": "ultra"},
+  "seed": 7,
+  "limit": 5,
+  "rounds": 1,
+  "timeout": 60,
+  "max_attempts": 2
+}
