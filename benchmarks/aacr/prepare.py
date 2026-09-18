@@ -8,6 +8,7 @@ import re
 import platform
 import shutil
 import subprocess
+import tempfile
 import time
 import uuid
 
@@ -72,7 +73,7 @@ def snapshot(repo: Path, ref: str, dest: Path, untracked: list[str], required: l
                 content = subprocess.check_output(['git', '-C', str(repo), 'cat-file', 'blob', obj])
                 executable = mode == '100755'
             # Fail closed on common embedded credentials; path exclusions alone are insufficient.
-            if re.search(rb'-----BEGIN .*PRIVATE KEY-----|(?:sk|ghp|github_pat)-[A-Za-z0-9_]{16,}', content):
+            if re.search(rb'-----BEGIN .*PRIVATE KEY-----|sk-[A-Za-z0-9_-]{16,}|(?:ghp|github_pat)_[A-Za-z0-9_]{16,}', content):
                 raise BenchError(f'possible embedded credential: {name}')
             result[name] = (content, executable)
         return result
@@ -178,7 +179,14 @@ def prepare(config_path: Path, root: Path, reviewer: dict | None = None) -> dict
         if not diff:
             raise BenchError('empty Review range')
         bundle = root / 'inputs' / f'{index}.bundle'
-        git(local, 'bundle', 'create', str(bundle), '--all')
+        # Fetch only the required head into a disposable bare repo: unrelated source
+        # branches/tags must not cross into the reviewer's clone.
+        with tempfile.TemporaryDirectory(prefix='aacr-bundle-') as temp:
+            staging = Path(temp)
+            git(staging, 'init', '--bare', '-q')
+            git(staging, 'fetch', '--no-tags', str(local), instance.head_commit)
+            git(staging, 'update-ref', 'refs/heads/review', instance.head_commit)
+            git(staging, 'bundle', 'create', str(bundle), 'refs/heads/review')
         case.update({'key': str(index), 'bundle': bundle.name, 'diff_hash': digest(diff.encode()),
                      'classification': 'unavailable'})
         cases.append(case)

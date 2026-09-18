@@ -64,7 +64,9 @@ def main():
     if mode == 'once' and request['attempt'] == 1:
         emit({'type': 'benchmark.usage', 'scope': 'inclusive', 'agents': {'main': {'input_tokens': 5, 'output_tokens': 2}}})
         return 9
-    if mode == 'timeout':
+    if mode == 'timeout' or (mode == 'interrupt-once' and request['attempt'] == 1):
+        if behavior.get('partial_event'):
+            print('{"type":', end='', flush=True)
         child = subprocess.Popen(['/usr/bin/python3', '-c',
                                   'import time\nwhile True:\n with open("/work/heartbeat", "a") as f: f.write("alive\\n")\n time.sleep(.05)'])
         emit({'type': 'benchmark.child', 'pid': child.pid})

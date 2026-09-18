@@ -57,7 +57,9 @@ def evaluate(root: Path, judge_config: dict | None = None, judge_rounds: int = 1
                     target.mkdir(parents=True, exist_ok=True)
                     write(target / (case['instance_id'].replace('/', '__') + '.json'),
                           {'review_output': [f for axis in ('Standards', 'Spec') for f in result['axes'][axis]],
-                           'duration_seconds': result['duration_seconds']})
+                           'duration_seconds': result['duration_seconds'],
+                           'token_usage': {k: result['usage'][k] for k in ('input_tokens', 'output_tokens')}
+                                          if result['usage']['status'] == 'known' else {}})
                     for j in range(judge_rounds):
                         instance = schema.ReviewInstance.from_dict(case, case['instance_id'])
                         # Preserve upstream scorer's exact path/side/line/matching and rounding.

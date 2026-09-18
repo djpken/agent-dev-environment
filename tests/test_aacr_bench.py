@@ -2,11 +2,13 @@
 import hashlib
 import json
 import os
+import signal
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import time
+import threading
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,6 +102,7 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(report['candidate']['semantic_f1'], 1)
         self.assertEqual(report['delta']['semantic_f1']['percentage_points'], 100)
         self.assertEqual(report['candidate']['avg_tokens'], 180)
+        self.assertEqual(report['candidate']['official_summary']['total_tokens'], 180)
         self.assertGreater(report['candidate']['avg_time'], 0)
         self.assertEqual(report['versions']['baseline']['commit'], self.base)
         self.assertEqual(report['versions']['candidate']['commit'], self.head)
@@ -302,6 +305,83 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(report['bootstrap']['paired_prs'], 2)
         self.assertEqual(report['bootstrap']['interval'], [100, 100])
         self.assertEqual(self.report()['bootstrap'], report['bootstrap'])
+
+    def test_partial_round_pairing_uses_only_common_measurements(self):
+        self.config['rounds'] = 2
+        self.save_config()
+        self.prepare()
+        self.cli('run', '--max-jobs', 3)
+        report = self.report()
+        self.assertEqual(report['status'], 'incomplete')
+        self.assertEqual(report['baseline']['completed'], 2)
+        self.assertEqual(report['candidate']['completed'], 1)
+        pair = report['paired'][0]
+        self.assertEqual(pair['measurements_per_side'], 1)
+        self.assertEqual(pair['baseline']['official_summary']['evaluated_instances'], 1)
+
+    def test_embedded_github_credentials_are_rejected_before_snapshot(self):
+        for prefix in ('ghp_', 'github_pat_'):
+            with self.subTest(prefix=prefix):
+                self.out = self.root / prefix
+                self.config['candidate'] = 'workspace'
+                (self.repo / 'app.py').write_text('token = "' + prefix + 'a' * 36 + '"\n')
+                self.save_config()
+                self.assertIn('embedded credential', self.cli('prepare', '--config', self.config_path, ok=False).stderr)
+
+    def test_interrupt_and_resume_keeps_successful_attempt(self):
+        self.config.update(candidate='workspace', timeout=10)
+        self.behavior.update(failure='interrupt-once', partial_event=True)
+        self.write_behavior()
+        self.save_config()
+        self.prepare()
+        proc = subprocess.Popen([sys.executable, '-m', 'benchmarks.aacr', 'run', '--out', str(self.out)],
+                                cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            deadline = time.monotonic() + 8
+            while not list((self.out / 'runs' / 'candidate').rglob('heartbeat')) and time.monotonic() < deadline:
+                time.sleep(.05)
+            self.assertTrue(list((self.out / 'runs' / 'candidate').rglob('heartbeat')))
+            proc.send_signal(signal.SIGINT)
+            stdout, stderr = proc.communicate(timeout=5)
+            self.assertEqual(proc.returncode, 0, stderr)
+            self.assertEqual(json.loads(stdout)['reason'], 'interrupted')
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.communicate()
+        before = next((self.out / 'runs' / 'baseline').rglob('result.json')).read_bytes()
+        self.assertEqual(self.report()['status'], 'incomplete')
+        self.cli('run')
+        report = self.report()
+        self.assertEqual(report['status'], 'complete')
+        self.assertEqual(report['candidate']['all_attempts']['unknown_usage_count'], 1)
+        self.assertEqual(next((self.out / 'runs' / 'baseline').rglob('result.json')).read_bytes(), before)
+
+    def test_snapshot_detects_concurrent_source_edit(self):
+        self.config['candidate'] = 'workspace'
+        self.save_config()
+        changing = self.repo / 'aaa-changing.txt'
+        changing.write_text('initial')
+        for n in range(120):
+            (self.repo / f'padding-{n:03}.txt').write_text('padding\n' * 10000)
+        self.git('add', '.')
+        stop = threading.Event()
+
+        def edit():
+            n = 0
+            while not stop.is_set():
+                changing.write_text(str(n))
+                n += 1
+                time.sleep(.001)
+
+        thread = threading.Thread(target=edit)
+        thread.start()
+        try:
+            result = self.cli('prepare', '--config', self.config_path, ok=False)
+            self.assertIn('workspace changed during snapshot', result.stderr)
+        finally:
+            stop.set()
+            thread.join()
 
 
 if __name__ == '__main__':

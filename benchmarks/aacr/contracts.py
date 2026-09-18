@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 from typing import Any
 
 VERSION = 1
@@ -35,8 +36,16 @@ def read(path: Path) -> Any:
 
 def write(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open('xb') as handle:
-        handle.write(encode(value))
+    # Link a fully flushed temporary file into place without replacing old artifacts.
+    fd, temporary = tempfile.mkstemp(prefix='.pending-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write(encode(value))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(temporary, path)
+    finally:
+        os.unlink(temporary)
 
 
 def model_config(value: dict | None) -> dict:

@@ -45,6 +45,8 @@ def usage(events: list) -> dict:
                                 for k in ('input_tokens', 'output_tokens')) for a in selected):
         return {'status': 'unknown', 'total_tokens': None}
     return {'status': 'known', 'scope': record['scope'], 'agents': agents,
+            'input_tokens': sum(agents[a]['input_tokens'] for a in selected),
+            'output_tokens': sum(agents[a]['output_tokens'] for a in selected),
             'total_tokens': sum(agents[a]['input_tokens'] + agents[a]['output_tokens'] for a in selected)}
 
 
@@ -121,35 +123,48 @@ def attempt(root: Path, manifest: dict, case: dict, side: str, round_id: int, nu
         if not secret:
             raise BenchError('fake credential reference requires AACR_FAKE_SECRET; real vault reads are disabled')
         child_env['AACR_FAKE_SECRET'] = secret
-    with (folder / 'stdout.jsonl').open('wb') as stdout, (folder / 'stderr.txt').open('wb') as stderr:
-        proc = subprocess.Popen(sandbox(work) + command, stdin=subprocess.PIPE, stdout=stdout, stderr=stderr,
-                                env=child_env, start_new_session=True)
+    proc = subprocess.Popen(sandbox(work) + command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            env=child_env, start_new_session=True)
+    stdout, stderr = b'', b''
+    try:
+        stdout, stderr = proc.communicate(prompt.encode(), timeout=manifest['settings']['timeout'])
+        if proc.returncode:
+            status, reason = 'failed', f'exit {proc.returncode}'
+    except subprocess.TimeoutExpired:
+        status, reason = 'timed_out', 'workflow timeout'
+    except KeyboardInterrupt:
+        status, reason = 'failed', 'interrupted'
+    finally:
+        # The PID namespace also reaps children that changed their process group.
         try:
-            proc.communicate(prompt.encode(), timeout=manifest['settings']['timeout'])
-            if proc.returncode:
-                status, reason = 'failed', f'exit {proc.returncode}'
-        except subprocess.TimeoutExpired:
-            status, reason = 'timed_out', 'workflow timeout'
-        finally:
-            # Also kill descendants after a successful parent exit, including inherited output pipes.
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            proc.wait()
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        remaining_out, remaining_err = proc.communicate()
+        stdout, stderr = remaining_out or stdout, remaining_err or stderr
     duration = time.monotonic() - start
     if secret:
-        for p in (folder / 'stdout.jsonl', folder / 'stderr.txt', work / 'output.json'):
+        stdout = stdout.replace(secret.encode(), b'[REDACTED]')
+        stderr = stderr.replace(secret.encode(), b'[REDACTED]')
+    (folder / 'stdout.jsonl').write_bytes(stdout)
+    (folder / 'stderr.txt').write_bytes(stderr)
+    if secret:
+        for p in (work / 'output.json',):
             if p.exists():
                 p.write_bytes(p.read_bytes().replace(secret.encode(), b'[REDACTED]'))
     events = []
     try:
-        events = [json.loads(line) for line in (folder / 'stdout.jsonl').read_text().splitlines() if line]
-        if any(not isinstance(e, dict) for e in events):
-            raise ValueError('event must be an object')
+        for line in (folder / 'stdout.jsonl').read_text().splitlines():
+            if not line:
+                continue
+            event = json.loads(line)
+            if not isinstance(event, dict):
+                raise ValueError('event must be an object')
+            events.append(event)
     except (ValueError, UnicodeError):
-        status, reason = 'invalid_output', 'invalid event stream'
-        events = []
+        # A truncated final event must not erase an interrupt/timeout or earlier usage.
+        if status == 'completed':
+            status, reason = 'invalid_output', 'invalid event stream'
     parsed = None
     evidence = [e for e in events if e.get('type') == 'benchmark.evidence']
     axes = [e for e in events if e.get('type') == 'benchmark.axis']
@@ -185,7 +200,7 @@ def results(root: Path, manifest: dict) -> dict:
                 attempts = []
                 for p in sorted(folder.glob('*/started.json'), key=lambda p: int(p.parent.name)):
                     result_file = p.parent / 'result.json'
-                    if result_file.exists():
+                    if result_file.exists() and (p.parent / 'result.sha256.json').exists():
                         result = read(result_file)
                         if digest(encode(result)) != read(p.parent / 'result.sha256.json') or result['manifest_hash'] != digest(encode(manifest)):
                             raise BenchError('result/manifest mismatch')
@@ -215,6 +230,8 @@ def run(root: Path, max_jobs: int | None = None) -> dict:
                         continue
                     if max_jobs is not None and count >= max_jobs:
                         return {'attempted': count, 'stopped': True}
-                    attempt(root, manifest, case, side, round_id, n)
+                    result = attempt(root, manifest, case, side, round_id, n)
                     count += 1
+                    if result['reason'] == 'interrupted':
+                        return {'attempted': count, 'stopped': True, 'reason': 'interrupted'}
         return {'attempted': count, 'stopped': False}

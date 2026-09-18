@@ -15,7 +15,8 @@ METRICS = ('semantic_f1', 'precision', 'recall', 'avg_time', 'avg_tokens')
 def aggregate(scores: list) -> dict:
     _, _, _, scorer = modules()
     stats = {k: 0 for k in ('expected_notes', 'generated_notes', 'matched_semantic_notes', 'matched_line_notes',
-                             'total_instances', 'candidate_instances', 'evaluated_instances', 'missing_instances')}
+                             'total_instances', 'candidate_instances', 'evaluated_instances', 'missing_instances',
+                             'total_duration_seconds', 'total_input_tokens', 'total_output_tokens')}
     for score in scores:
         for key in stats:
             stats[key] += score['summary'][key]
@@ -49,10 +50,19 @@ def side_summary(evaluation: dict, side: str) -> dict:
             'clone_seconds': sum(a.get('clone_seconds', 0) for a in attempts)}
 
 
-def bootstrap(evaluation: dict, seed: int, samples: int = 1000) -> dict:
+def paired_scores(evaluation: dict) -> dict:
+    indexed = {side: {(s['case_id'], s['reviewer_round'], s['judge_round']): s
+                      for s in evaluation['scores'] if s['side'] == side} for side in SIDES}
+    common = set(indexed['baseline']) & set(indexed['candidate'])
     by_side: dict[str, dict[str, list]] = {side: {} for side in SIDES}
-    for score in evaluation['scores']:
-        by_side[score['side']].setdefault(score['case_id'], []).append(score)
+    for key in sorted(common):
+        for side in SIDES:
+            by_side[side].setdefault(key[0], []).append(indexed[side][key])
+    return by_side
+
+
+def bootstrap(evaluation: dict, seed: int, samples: int = 1000) -> dict:
+    by_side = paired_scores(evaluation)
     keys = sorted(set(by_side['baseline']) & set(by_side['candidate']))
     if len(keys) < 2:
         return {'unit': 'PR', 'seed': seed, 'interval': None, 'reason': 'fewer than two paired PRs'}
@@ -91,11 +101,13 @@ def compare(root: Path, evaluation_id: str) -> dict:
             else:
                 delta[metric]['ratio'] = b / a if a and b is not None else None
         paired = []
+        common = paired_scores(evaluation)
         for case_id in manifest['case_ids']:
-            scores = {side: [s for s in evaluation['scores'] if s['case_id'] == case_id and s['side'] == side] for side in SIDES}
+            scores = {side: common[side].get(case_id, []) for side in SIDES}
             if all(scores.values()):
                 values = {side: aggregate(v) for side, v in scores.items()}
                 paired.append({'case_id': case_id, 'baseline': values['baseline'], 'candidate': values['candidate'],
+                               'measurements_per_side': len(scores['baseline']),
                                'regression': values['candidate']['semantic_f1'] < values['baseline']['semantic_f1']})
         report = {'schema_version': 1, 'evaluation_id': evaluation_id, 'experiment_id': manifest['experiment_id'],
                   'smoke_only': True, 'report_only': True, 'status': 'complete' if complete else 'incomplete',

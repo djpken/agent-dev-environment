@@ -1,13 +1,17 @@
 """Load byte-for-byte pinned upstream modules. No upstream CLI/network bootstrap."""
 import importlib
+from functools import lru_cache
 import os
 import sys
 from .contracts import PACKAGE, BenchError, digest, read
 
 
+@lru_cache(maxsize=1)
 def modules():
     lock = read(PACKAGE / 'upstream.lock.json')
     vendor = PACKAGE / 'vendor'
+    if (vendor / '.env').exists():
+        raise BenchError('upstream environment files are prohibited')
     for name, expected in lock['files'].items():
         if digest((vendor / name).read_bytes()) != expected:
             raise BenchError(f'upstream checksum mismatch: {name}')

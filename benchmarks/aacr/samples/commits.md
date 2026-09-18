@@ -9,7 +9,7 @@ Status: complete. offline pipeline evidence only; no model quality or merge verd
 | semantic_f1 | 0.0 | 1.0 | 100.0 |
 | precision | 0.0 | 1.0 | 100.0 |
 | recall | 0.0 | 1.0 | 100.0 |
-| avg_time | 0.3160973209887743 | 0.3163263197056949 | 0.00022899871692061424 |
+| avg_time | 0.28414278011769056 | 0.2754423110745847 | -0.00870046904310584 |
 | avg_tokens | 180 | 180 | 0 |
 
 Quality differences are percentage points. Full ratios, usage coverage, attempts,
