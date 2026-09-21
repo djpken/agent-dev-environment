@@ -1,0 +1,16 @@
+[project]
+name = "ade-aacr-bench"
+version = "0.1.0"
+description = "Offline development harness for paired Standards/Spec workflow evaluation"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = ["mypy==1.19.1"]
+
+[tool.mypy]
+files = ["benchmarks/aacr"]
+exclude = ["benchmarks/aacr/vendor/"]
+check_untyped_defs = true
+ignore_missing_imports = true
+follow_imports = "silent"

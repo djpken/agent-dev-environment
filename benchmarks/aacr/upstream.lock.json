@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/alibaba/aacr-bench",
+  "commit": "68a569759289a83654a59d06db2a72910edf0a4a",
+  "license": "Apache-2.0",
+  "files": {
+    "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "config.py": "c0152f6d4c8a4b103f99943cc9f6838e31281460b15686e6c4979b8dd5909e76",
+    "converters/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "converters/aacr_bench.py": "ff91d08efbfc72ad39d7b863eebeecb9bc653ab4f46dfed7ab1352fc479582d3",
+    "evaluate.py": "51917af91b29d00d4f4d1c45d089ff73c7ede74e84d82eb1ba241b50d88d7979",
+    "judge.py": "c5305284ae895d7d184a181bc3eb1ba6c3aee1d163cf37435138cd3dd7af663a",
+    "schema.py": "55310e814bbb649170a17acd5f76889ff032b81ce9722f5f3c26e04a809cb68f"
+  },
+  "dataset": {
+    "source": "https://raw.githubusercontent.com/alibaba/aacr-bench/68a569759289a83654a59d06db2a72910edf0a4a/dataset/positive_samples.json",
+    "sha256": "7a4a0e7046ffd1b8f41f951480bbb618d23d38d9f67364f38aabcda121a50be3",
+    "license": "Apache-2.0"
+  }
+}

@@ -1,0 +1,412 @@
+{
+  "baseline": {
+    "all_attempts": {
+      "count": 1,
+      "known_tokens": 180,
+      "known_usage_count": 1,
+      "known_wall_seconds": 0.27676506992429495,
+      "unknown_duration_count": 0,
+      "unknown_usage_count": 0
+    },
+    "avg_time": 0.27676506992429495,
+    "avg_tokens": 180,
+    "clone_seconds": 0.06375881982967257,
+    "completed": 1,
+    "failed": 0,
+    "invalid_output": 0,
+    "line_f1": 0.0,
+    "line_precision": 0.0,
+    "line_recall": 0.0,
+    "missing": 0,
+    "official_summary": {
+      "avg_duration_seconds": 0.28,
+      "avg_input_tokens": 150,
+      "avg_output_tokens": 30,
+      "candidate_instances": 1,
+      "evaluated_instances": 1,
+      "expected_notes": 1,
+      "generated_notes": 0,
+      "line_f1": 0.0,
+      "line_match_rate": 0.0,
+      "line_recall_rate": 0.0,
+      "matched_line_notes": 0,
+      "matched_semantic_notes": 0,
+      "missing_instances": 0,
+      "semantic_f1": 0.0,
+      "semantic_match_rate": 0.0,
+      "semantic_recall_rate": 0.0,
+      "total_duration_seconds": 0.28,
+      "total_input_tokens": 150,
+      "total_instances": 1,
+      "total_output_tokens": 30,
+      "total_tokens": 180
+    },
+    "precision": 0.0,
+    "recall": 0.0,
+    "requested": 1,
+    "semantic_f1": 0.0,
+    "timed_out": 0,
+    "usage_coverage": {
+      "completed": 1,
+      "known": 1,
+      "requested": 1
+    }
+  },
+  "bootstrap": {
+    "interval": null,
+    "reason": "fewer than two paired PRs",
+    "seed": 7,
+    "unit": "PR"
+  },
+  "candidate": {
+    "all_attempts": {
+      "count": 2,
+      "known_tokens": 187,
+      "known_usage_count": 2,
+      "known_wall_seconds": 0.4806601391173899,
+      "unknown_duration_count": 0,
+      "unknown_usage_count": 0
+    },
+    "avg_time": 0.28716430719941854,
+    "avg_tokens": 180,
+    "clone_seconds": 0.1262460621073842,
+    "completed": 1,
+    "failed": 0,
+    "invalid_output": 0,
+    "line_f1": 1.0,
+    "line_precision": 1.0,
+    "line_recall": 1.0,
+    "missing": 0,
+    "official_summary": {
+      "avg_duration_seconds": 0.29,
+      "avg_input_tokens": 150,
+      "avg_output_tokens": 30,
+      "candidate_instances": 1,
+      "evaluated_instances": 1,
+      "expected_notes": 1,
+      "generated_notes": 1,
+      "line_f1": 1.0,
+      "line_match_rate": 1.0,
+      "line_recall_rate": 1.0,
+      "matched_line_notes": 1,
+      "matched_semantic_notes": 1,
+      "missing_instances": 0,
+      "semantic_f1": 1.0,
+      "semantic_match_rate": 1.0,
+      "semantic_recall_rate": 1.0,
+      "total_duration_seconds": 0.29,
+      "total_input_tokens": 150,
+      "total_instances": 1,
+      "total_output_tokens": 30,
+      "total_tokens": 180
+    },
+    "precision": 1.0,
+    "recall": 1.0,
+    "requested": 1,
+    "semantic_f1": 1.0,
+    "timed_out": 0,
+    "usage_coverage": {
+      "completed": 1,
+      "known": 1,
+      "requested": 1
+    }
+  },
+  "conclusion": "offline pipeline evidence only; no model quality or merge verdict",
+  "dataset": {
+    "cases_hash": "70d823a37a11720e7eb61fb34ac5d5ae6204a0f205bfaf8388b17d5ddfb086d1",
+    "kind": "fixture",
+    "seed": 7,
+    "sha256": "2a91a2f0d617aeb3ae7c443a4a37c044a3867de917d1b11acdb53a9d25748acf",
+    "source": "local fixture"
+  },
+  "delta": {
+    "avg_time": {
+      "absolute": 0.010399237275123596,
+      "ratio": 1.0375742404125208
+    },
+    "avg_tokens": {
+      "absolute": 0,
+      "ratio": 1.0
+    },
+    "precision": {
+      "absolute": 1.0,
+      "percentage_points": 100.0
+    },
+    "recall": {
+      "absolute": 1.0,
+      "percentage_points": 100.0
+    },
+    "semantic_f1": {
+      "absolute": 1.0,
+      "percentage_points": 100.0
+    }
+  },
+  "details": [
+    {
+      "axes": {
+        "Spec": [],
+        "Standards": []
+      },
+      "case_id": "example__synthetic@94727f2",
+      "classification": "unavailable",
+      "findings_hash": "0be4a5c23c8c8f1c47af1911c562adeea39733dfa56b9a762d8dbc9c620e4639",
+      "judge_round": 0,
+      "key": "0",
+      "matches": [
+        {
+          "comments": [
+            {
+              "from_line": 1,
+              "line_match": false,
+              "matched_note": "",
+              "note": "Validate user input",
+              "path": "app.py",
+              "semantic_match": false,
+              "side": "right",
+              "to_line": 1
+            }
+          ],
+          "instance_id": "example__synthetic@94727f2",
+          "repo": "example/synthetic"
+        }
+      ],
+      "reviewer_round": 0,
+      "side": "baseline",
+      "summary": {
+        "avg_duration_seconds": 0.28,
+        "avg_input_tokens": 150,
+        "avg_output_tokens": 30,
+        "candidate_instances": 1,
+        "evaluated_instances": 1,
+        "expected_notes": 1,
+        "generated_notes": 0,
+        "line_f1": 0.0,
+        "line_match_rate": 0.0,
+        "line_recall_rate": 0.0,
+        "matched_line_notes": 0,
+        "matched_semantic_notes": 0,
+        "missing_instances": 0,
+        "semantic_f1": 0.0,
+        "semantic_match_rate": 0.0,
+        "semantic_recall_rate": 0.0,
+        "total_duration_seconds": 0.28,
+        "total_input_tokens": 150,
+        "total_instances": 1,
+        "total_output_tokens": 30,
+        "total_tokens": 180
+      }
+    },
+    {
+      "axes": {
+        "Spec": [],
+        "Standards": [
+          {
+            "description": "",
+            "end_line": 1,
+            "file": "app.py",
+            "start_line": 1,
+            "summary": "Validate user input"
+          }
+        ]
+      },
+      "case_id": "example__synthetic@94727f2",
+      "classification": "unavailable",
+      "findings_hash": "f472f8257a3f031516e5e2e76cd72503c7781f6c76fd431af0ef2096e289a60d",
+      "judge_round": 0,
+      "key": "0",
+      "matches": [
+        {
+          "comments": [
+            {
+              "from_line": 1,
+              "line_match": true,
+              "matched_note": "Validate user input",
+              "note": "Validate user input",
+              "path": "app.py",
+              "semantic_match": true,
+              "side": "right",
+              "to_line": 1
+            }
+          ],
+          "instance_id": "example__synthetic@94727f2",
+          "repo": "example/synthetic"
+        }
+      ],
+      "reviewer_round": 0,
+      "side": "candidate",
+      "summary": {
+        "avg_duration_seconds": 0.29,
+        "avg_input_tokens": 150,
+        "avg_output_tokens": 30,
+        "candidate_instances": 1,
+        "evaluated_instances": 1,
+        "expected_notes": 1,
+        "generated_notes": 1,
+        "line_f1": 1.0,
+        "line_match_rate": 1.0,
+        "line_recall_rate": 1.0,
+        "matched_line_notes": 1,
+        "matched_semantic_notes": 1,
+        "missing_instances": 0,
+        "semantic_f1": 1.0,
+        "semantic_match_rate": 1.0,
+        "semantic_recall_rate": 1.0,
+        "total_duration_seconds": 0.29,
+        "total_input_tokens": 150,
+        "total_instances": 1,
+        "total_output_tokens": 30,
+        "total_tokens": 180
+      }
+    }
+  ],
+  "evaluation_id": "774adf5bb588471596d23e35519312af",
+  "experiment_elapsed_seconds": 2.4951750254258513,
+  "experiment_id": "56b2d3f13a914bd694dd25c2e7375601",
+  "judge": {
+    "model": "fake-independent-judge",
+    "reasoning_effort": "high"
+  },
+  "judge_seconds": 0.013371871784329414,
+  "judge_usage": {
+    "requests": 1,
+    "status": "mock-no-model",
+    "total_tokens": null
+  },
+  "limitations": [
+    "Mock output is smoke-only; real model, skill loading and all child usage need pilot validation.",
+    "Spec uses commit subjects; original requirements are limited.",
+    "Same-model reviewer/Judge may share bias. Tokens are not billing amounts.",
+    "Small samples and single rounds cannot establish significance.",
+    "Unknown usage forbids complete cost-improvement claims.",
+    "Incomplete runs are diagnostic only; official summaries omit missing results.",
+    "Classification unavailable in the official converted schema."
+  ],
+  "paired": [
+    {
+      "baseline": {
+        "line_f1": 0.0,
+        "line_precision": 0.0,
+        "line_recall": 0.0,
+        "official_summary": {
+          "avg_duration_seconds": 0.28,
+          "avg_input_tokens": 150,
+          "avg_output_tokens": 30,
+          "candidate_instances": 1,
+          "evaluated_instances": 1,
+          "expected_notes": 1,
+          "generated_notes": 0,
+          "line_f1": 0.0,
+          "line_match_rate": 0.0,
+          "line_recall_rate": 0.0,
+          "matched_line_notes": 0,
+          "matched_semantic_notes": 0,
+          "missing_instances": 0,
+          "semantic_f1": 0.0,
+          "semantic_match_rate": 0.0,
+          "semantic_recall_rate": 0.0,
+          "total_duration_seconds": 0.28,
+          "total_input_tokens": 150,
+          "total_instances": 1,
+          "total_output_tokens": 30,
+          "total_tokens": 180
+        },
+        "precision": 0.0,
+        "recall": 0.0,
+        "semantic_f1": 0.0
+      },
+      "candidate": {
+        "line_f1": 1.0,
+        "line_precision": 1.0,
+        "line_recall": 1.0,
+        "official_summary": {
+          "avg_duration_seconds": 0.29,
+          "avg_input_tokens": 150,
+          "avg_output_tokens": 30,
+          "candidate_instances": 1,
+          "evaluated_instances": 1,
+          "expected_notes": 1,
+          "generated_notes": 1,
+          "line_f1": 1.0,
+          "line_match_rate": 1.0,
+          "line_recall_rate": 1.0,
+          "matched_line_notes": 1,
+          "matched_semantic_notes": 1,
+          "missing_instances": 0,
+          "semantic_f1": 1.0,
+          "semantic_match_rate": 1.0,
+          "semantic_recall_rate": 1.0,
+          "total_duration_seconds": 0.29,
+          "total_input_tokens": 150,
+          "total_instances": 1,
+          "total_output_tokens": 30,
+          "total_tokens": 180
+        },
+        "precision": 1.0,
+        "recall": 1.0,
+        "semantic_f1": 1.0
+      },
+      "case_id": "example__synthetic@94727f2",
+      "measurements_per_side": 1,
+      "regression": false
+    }
+  ],
+  "report_only": true,
+  "reviewer": {
+    "model": "gpt-5.6-luna",
+    "reasoning_effort": "ultra"
+  },
+  "schema_version": 1,
+  "setup_seconds": 0.21437253709882498,
+  "smoke_only": true,
+  "status": "complete",
+  "versions": {
+    "baseline": {
+      "commit": "affea3ac4933bfadc87c2246d6fad4e3bb19a6ee",
+      "digest": "95b0d509afb5ac78ca4da2ce55261c9b820fc24f70383822ee45bc546f12582b",
+      "excluded": {},
+      "included": {
+        "app.py": {
+          "executable": false,
+          "sha256": "585c93666fcb046b7b264d3fa73202aa2a38254ae82a4b3ba19e873c2d5a9886"
+        },
+        "fake-review.json": {
+          "executable": false,
+          "sha256": "dfc0f95a7821fb8246aac96523736e141a77ff7ff65d6ad42ff8a86e06f435c4"
+        },
+        "skills/base/SKILL.md": {
+          "executable": false,
+          "sha256": "44d2229d01dd4f089c397f4113f776aca4e0e248644b7e69cee02d0fb868d0e1"
+        },
+        "skills/code-review/SKILL.md": {
+          "executable": false,
+          "sha256": "6aaae159ec8ad9895642b187e4accabc853833913f0532f34ce93deeb462ffed"
+        }
+      },
+      "kind": "commit"
+    },
+    "candidate": {
+      "commit": "94727f2aad931e564ed61870c1efc64976a3a954",
+      "digest": "404803424291ca3405cfd94c29c20ec09e0244e9b4f392327f7b807d10d8386d",
+      "excluded": {},
+      "included": {
+        "app.py": {
+          "executable": false,
+          "sha256": "826c32a3a477121fc1c151be5dbc3ceddebc45a178bd900f8af9e8ab73d1e46a"
+        },
+        "fake-review.json": {
+          "executable": false,
+          "sha256": "eb5375ab6d01dc62d4e133ec727ff76ba9714e1836f705d45242d1325d88b3a8"
+        },
+        "skills/base/SKILL.md": {
+          "executable": false,
+          "sha256": "44d2229d01dd4f089c397f4113f776aca4e0e248644b7e69cee02d0fb868d0e1"
+        },
+        "skills/code-review/SKILL.md": {
+          "executable": false,
+          "sha256": "6aaae159ec8ad9895642b187e4accabc853833913f0532f34ce93deeb462ffed"
+        }
+      },
+      "kind": "workspace"
+    }
+  }
+}
