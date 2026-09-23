@@ -104,7 +104,7 @@ Linux + systemd VM 可用 [`deploy/agent-environment/`](../deploy/agent-environm
 
 管理面可設定 `allow_http: true`、`tls: {}` 與 HTTP `public_origin`，供公司 VPN／Tailscale 直接存取；額外入口須加入 `allowed_origins`。HTTP 的傳輸保護由外部網路提供。登入使用 VM、origin、nonce 與期限綁定的自訂 challenge，非 SIWE。
 
-未登入時只顯示登入入口，包含 `/healthz` 在內的環境 API 都需要 wallet session。首次連接 wallet 時可開始 `Wallet registration`，使用者以 browser wallet 簽署一次性註冊訊息後成為該 VM 的 admin。登入再簽署一次，建立 12 小時的 Wallet-authorized session；有效期間內，角色允許的更新、重啟與排程設定免再次簽署。同一分頁重新整理會恢復並驗證 session。Root helper 保存 token 雜湊及一次性操作核准紀錄，執行前會再次檢查 session 與角色。更新失敗時，更新器依 manifest 執行 rollback。
+未登入時可查看公開的唯讀 GitHub Trending 與 Trendshift 即時排行；`GET /api/v1/trending` 只接受固定來源與每日／每週／每月期間，每個來源與期間在 VM 記憶體快取 45 秒，不保存候選或排行資料。環境管理 API，包含 `/healthz`，仍需要 wallet session。首次連接 wallet 時可開始 `Wallet registration`，使用者以 browser wallet 簽署一次性註冊訊息後成為該 VM 的 admin。登入再簽署一次，建立 12 小時的 Wallet-authorized session；有效期間內，角色允許的更新、重啟與排程設定免再次簽署。同一分頁重新整理會恢復並驗證 session。Root helper 保存 token 雜湊及一次性操作核准紀錄，執行前會再次檢查 session 與角色。更新失敗時，更新器依 manifest 執行 rollback。
 
 Admin 可啟用、修改或停用每日更新。新排程沒有到期日，登出、session 過期或原設定者的身份異動都不會取消排程；執行時仍受 VM 與元件 allowlist 限制。設定保存在 root-owned `/etc/ade/agent-environment.auth/policy.json`，既有共用 state 中的簽署 policy 僅作為尚未替換時的相容來源。升級前須安裝 `agent-environment-authorize` helper 與 sudoers entry，再重啟管理服務，詳見 [部署文件](../deploy/agent-environment/README.md)與 [ADR-0013](adr/0013-wallet-authorized-environment-session.md)。
 
