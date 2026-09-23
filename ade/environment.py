@@ -32,6 +32,8 @@ from eth_account import Account
 from eth_account.messages import encode_defunct
 from eth_keys.exceptions import BadSignature
 
+from .trending import TrendingFetchError, TrendingRequestError, TrendingService
+
 
 ENVIRONMENT_VERSION = "1"
 DEFAULT_CONFIG_PATH = Path("/etc/ade/agent-environment.json")
@@ -1077,26 +1079,39 @@ class UpdateCoordinator:
 
 def dashboard_html(config: EnvironmentConfig) -> str:
     return """<!doctype html>
-<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
-<title>Sign in · Agent environment</title>
+<html lang=\"zh-TW\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+<title>ADES · Agent Development Environment Service</title>
 <style>
-:root{color-scheme:dark;font:15px system-ui,sans-serif;background:#0d1117;color:#eef2f6}
-body{margin:0;padding:28px}main{max-width:1100px;margin:auto}header{display:flex;justify-content:space-between;gap:16px;align-items:start;margin-bottom:24px}
-h1{font-size:30px;margin:0 0 6px}p{color:#aab5c1;margin:6px 0}button{border:1px solid #3c84b7;background:#17344a;color:#e9f5ff;border-radius:8px;padding:9px 13px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}
-.panel{background:#151b23;border:1px solid #2b3542;border-radius:14px;padding:18px;margin:16px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
-.card{background:#1a212b;border:1px solid #2b3542;border-radius:12px;padding:15px}.card h3{margin:0 0 8px;font-size:16px}.muted{color:#9ca9b7;font-size:13px}
-.badge{display:inline-block;border-radius:999px;padding:4px 9px;font-size:12px;margin-bottom:8px}.healthy{background:#123d2a;color:#7ce2a5}.degraded,.unknown{background:#433514;color:#ffd37a}.unhealthy{background:#4b1e27;color:#ff9aa8}.updating{background:#233860;color:#a8c9ff}
-code{color:#a6d8ff}pre{white-space:pre-wrap;word-break:break-word;color:#c9d1d9}.row{display:flex;justify-content:space-between;gap:12px;align-items:center}.notice{border-color:#8b6a2b;background:#2a2415}
-</style></head><body><main><header><div><h1>Agent environment</h1><p>登入後查看環境資訊。</p></div><div><button id=\"wallet\">Connect / register MetaMask</button><button id=\"refresh\" hidden>Refresh</button><button id=\"logout\" hidden>Sign out</button><p id=\"auth\" class=\"muted\">請連接 MetaMask 登入。</p></div></header>
-<section class="panel notice" id="registration" hidden><h2>Register this VM</h2><p id="registration-status">尚未註冊。請連接 MetaMask，簽署註冊訊息。</p></section>
-<div id="private" hidden><section class=\"panel\"><div class=\"row\"><div><strong id=\"overall\"></strong><p id=\"checked\" class=\"muted\"></p></div><button id=\"update-all\" disabled>Update all</button></div><div id=\"components\" class=\"grid\"></div></section>
-<section class=\"panel\"><h2>Schedule</h2><p id=\"schedule\"></p><p id=\"policy\" class=\"muted\"></p><button id=\"authorize-policy\" disabled>Enable daily updates</button> <button id=\"disable-policy\" disabled>Disable daily updates</button></section>
-<section class=\"panel\"><h2>Update runs</h2><div id=\"runs\" class=\"muted\"></div></section>
+:root{--danger:#ff9eaa;--warning:#f3ce83}
+
+:root{color-scheme:dark;--bg:#0a1012;--sidebar:#0d1517;--surface:#111a1d;--line:#263639;--text:#e8f0ec;--muted:#9aada6;--accent:#8fd8b8;--accent-strong:#baf2d6;font:15px/1.55 \"Avenir Next\",\"Segoe UI Variable\",\"Noto Sans TC\",sans-serif;background:var(--bg);color:var(--text)}
+*{box-sizing:border-box}body{margin:0;min-height:100dvh;background:radial-gradient(ellipse at 82% 0%,#162626 0,transparent 38%),var(--bg)}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p{margin:7px 0;color:var(--muted)}h1,h2,h3{margin:0;line-height:1.2;letter-spacing:-.025em}h1{font-size:clamp(24px,2.4vw,31px);font-weight:650}h2{font-size:20px;font-weight:620}h3{font-size:16px;font-weight:600}button{font:inherit;border:1px solid #7bcaa6;background:#285b48;color:#eafff4;border-radius:10px;padding:11px 16px;cursor:pointer;transition:background .18s ease,transform .18s ease,border-color .18s ease}button:hover:not(:disabled){background:#347458;border-color:#a0e1bf;transform:translateY(-1px)}button:active:not(:disabled){transform:translateY(1px) scale(.99)}button:disabled{opacity:.5;cursor:not-allowed}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent-strong);outline-offset:3px}
+.skip-link{position:absolute;left:16px;top:-48px;padding:9px 12px;background:var(--accent-strong);color:#102019;border-radius:8px;z-index:2}.skip-link:focus{top:12px}.app-shell{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100dvh}.sidebar{position:sticky;top:0;height:100dvh;display:flex;flex-direction:column;padding:27px 17px 18px;background:var(--sidebar);border-right:1px solid var(--line)}.brand{display:flex;align-items:center;gap:12px;margin:0 0 48px;padding:0 7px;color:var(--text)}.brand:hover{text-decoration:none}.brand-mark{display:grid;place-items:center;width:38px;height:38px;border:1px solid #456a5a;border-radius:12px;background:#162621;color:var(--accent-strong);font-weight:750;letter-spacing:-.06em}.brand-name{display:block;font-size:14px;font-weight:700;letter-spacing:.04em}.brand-caption{display:block;margin-top:1px;color:#82958e;font-size:10px;letter-spacing:.11em;text-transform:uppercase}.sidebar-label{margin:0 10px 11px;color:#71837d;font-size:10px;font-weight:650;letter-spacing:.14em;text-transform:uppercase}.side-nav{display:grid;gap:5px}.side-link{display:flex;align-items:center;gap:12px;padding:10px 11px;border:1px solid transparent;border-radius:10px;color:#aebdb7;font-size:13px;transition:background .16s ease,color .16s ease}.side-link:hover{background:#14201f;color:var(--text);text-decoration:none}.side-link[aria-current=\"page\"]{background:#172823;border-color:#294338;color:var(--accent-strong)}.nav-index{width:20px;color:#71857c;font-size:10px;font-variant-numeric:tabular-nums}.side-link[aria-current=\"page\"] .nav-index{color:var(--accent)}.sidebar-bottom{display:flex;align-items:center;gap:9px;margin-top:auto;padding:13px 10px;border-top:1px solid var(--line);color:#899c94;font-size:11px}.service-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px #20352b}
+.workspace{min-width:0}.topbar{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:27px clamp(20px,4vw,58px) 22px;border-bottom:1px solid #1e2b2d}.eyebrow{margin:0 0 5px;color:#81958d;font-size:10px;font-weight:650;letter-spacing:.15em;text-transform:uppercase}.topbar-actions{display:flex;align-items:center;gap:10px}.identity{max-width:250px;overflow:hidden;color:#acbbb5;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.button-quiet{padding:8px 12px;border-color:var(--line);background:transparent;color:#c4d0cb;font-size:12px}.button-quiet:hover:not(:disabled){background:#172221;border-color:#526b5f}.workspace main{max-width:1500px;margin:0 auto;padding:18px clamp(20px,4vw,58px) 68px}
+.auth-stage{display:grid;place-items:center;min-height:min(47vh,430px);padding:24px 0 36px}.auth-card{position:relative;width:min(100%,510px);padding:31px 34px 27px;overflow:hidden;border:1px solid #2d433b;border-radius:20px;background:linear-gradient(150deg,#14201d,#10191b 72%);box-shadow:0 28px 70px #02080755}.auth-card:before{position:absolute;inset:0 auto 0 0;width:3px;background:var(--accent);content:\"\"}.auth-mark{display:grid;place-items:center;width:43px;height:43px;margin-bottom:22px;border:1px solid #456a5a;border-radius:14px;background:#1c3028;color:var(--accent-strong);font-size:13px;font-weight:750;letter-spacing:-.04em}.auth-tag{display:inline-flex;align-items:center;gap:7px;margin:0 0 14px;color:#a4c7b5;font-size:10px;font-weight:650;letter-spacing:.12em;text-transform:uppercase}.auth-tag:before{width:6px;height:6px;border-radius:50%;background:var(--accent);content:\"\"}.auth-card h2{font-size:25px}.auth-description{max-width:42ch;margin:11px 0 23px;font-size:14px}.auth-card #wallet{min-width:190px}.auth-note{min-height:22px;margin:13px 0 0;font-size:12px}.auth-note.error,.trend-error{color:var(--danger)}.auth-footnote{margin-top:20px;padding-top:16px;border-top:1px solid #263639;color:#7f938b;font-size:11px}
+.section-block{margin:22px 0 0;padding:23px 25px;border:1px solid var(--line);border-radius:17px;background:#10181a}.section-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:21px}.section-title{display:flex;align-items:center;gap:11px}.section-mark{display:grid;place-items:center;width:34px;height:34px;border:1px solid #29473b;border-radius:10px;background:#172720;color:var(--accent);font-size:11px;font-weight:700}.section-subtitle{max-width:62ch;margin-top:7px;font-size:12px}.field-row{display:flex;flex-wrap:wrap;align-items:end;gap:12px}.field{display:grid;gap:6px;color:#aab9b3;font-size:12px}.field select{min-width:180px}input,select{background:#0c1315;color:var(--text);border:1px solid #3a4b4c;border-radius:9px;padding:9px 11px;max-width:100%;font:inherit}select{cursor:pointer}.rank-list{list-style:none;margin:18px 0 0;padding:0}.rank-item{display:grid;grid-template-columns:40px minmax(0,1fr);gap:13px;padding:15px 2px;border-top:1px solid #263437}.rank-no{padding-top:1px;color:#7fa991;font-size:16px;font-weight:650;font-variant-numeric:tabular-nums}.rank-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.repo,.source-link{color:var(--accent-strong);text-decoration:none}.repo{font-weight:650}.repo:hover,.source-link:hover{text-decoration:underline}.lang{border:1px solid #39494a;border-radius:6px;padding:2px 7px;color:#afc1b9;font-size:10px}.rank-meta{display:flex;flex-wrap:wrap;gap:12px;color:#91a39b;font-size:11px;margin-top:6px}.rank-desc{max-width:72ch;margin-top:6px;font-size:12px;word-break:break-word}.trend-error{font-size:12px}.muted{color:var(--muted);font-size:12px}.row{display:flex;justify-content:space-between;align-items:center;gap:14px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}.card{padding:17px;border:1px solid #29383a;border-radius:13px;background:#141e20}.card h3{margin:7px 0 8px}.card p{font-size:12px}.badge{display:inline-block;border-radius:6px;padding:3px 7px;font-size:10px;font-weight:650;letter-spacing:.02em}.healthy{background:#183528;color:#a8e6be}.degraded,.unknown{background:#3a301b;color:var(--warning)}.unhealthy{background:#46242a;color:#ffacb5}.updating{background:#233443;color:#a8c9e7}code{color:var(--accent-strong)}pre{white-space:pre-wrap;word-break:break-word;color:#c9d1d9}.notice{border-color:#695b35;background:#211e16}.panel-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:18px}
+@media(max-width:760px){.app-shell{grid-template-columns:minmax(0,1fr)}.sidebar{position:static;height:auto;padding:14px 17px 10px;border-right:0;border-bottom:1px solid var(--line)}.brand{margin:0 0 13px}.sidebar-label,.sidebar-bottom{display:none}.side-nav{display:flex;gap:5px;overflow-x:auto;padding-bottom:2px}.side-link{flex:0 0 auto;padding:8px 10px}.topbar{align-items:flex-start;padding:19px 18px 16px}.topbar-actions{gap:6px}.identity{max-width:130px}.workspace main{padding:13px 16px 44px}.auth-stage{min-height:0;padding:24px 0 34px}.auth-card{padding:27px 25px 23px}.section-block{padding:18px 16px;margin-top:15px}.section-head{flex-direction:column;align-items:stretch}.section-head>.row{align-items:flex-start}.field{flex:1}.field select{min-width:0;width:100%}.rank-item{grid-template-columns:30px minmax(0,1fr);gap:9px}}
+@media(max-width:420px){.topbar{flex-direction:column;gap:12px}.topbar-actions{width:100%;justify-content:space-between}.identity{max-width:180px}.auth-card h2{font-size:22px}.row{align-items:flex-start;flex-direction:column}}
+.global-error{max-width:300px;color:var(--danger);font-size:11px}</style></head><body data-registration-required=\"__REGISTRATION_REQUIRED__\"><a class=\"skip-link\" href=\"#main-content\">略過導覽</a><div class=\"app-shell\">
+<aside class=\"sidebar\"><a class=\"brand\" href=\"#trending\"><span class=\"brand-mark\">AE</span><span><span class=\"brand-name\">ADES</span><span class=\"brand-caption\">Environment service</span></span></a>
+<p class=\"sidebar-label\">Workspace</p><nav class=\"side-nav\" aria-label=\"主要導覽\"><a class=\"side-link\" href=\"#trending\" aria-current=\"page\"><span class=\"nav-index\">01</span><span>專案排行</span></a>
+<p class=\"sidebar-label\" id=\"private-nav-label\" hidden>管理</p><a class=\"side-link\" data-private-nav href=\"#environment\" hidden><span class=\"nav-index\">02</span><span>環境總覽</span></a><a class=\"side-link\" data-private-nav href=\"#schedule-panel\" hidden><span class=\"nav-index\">03</span><span>更新排程</span></a><a class=\"side-link\" data-private-nav href=\"#runs-panel\" hidden><span class=\"nav-index\">04</span><span>執行紀錄</span></a></nav>
+<div class=\"sidebar-bottom\"><span class=\"service-dot\"></span><span>公開閱讀模式</span></div></aside>
+<div class=\"workspace\"><header class=\"topbar\"><div><p class=\"eyebrow\">ADES / PUBLIC FEED</p><h1>GitHub 專案排行</h1></div><div class=\"topbar-actions\"><span id=\"auth-identity\" class=\"identity\">尚未登入</span><span id=\"global-error\" class=\"global-error\" role=\"alert\" hidden></span><button id=\"refresh\" class=\"button-quiet\" hidden>重新整理</button><button id=\"logout\" class=\"button-quiet\" hidden>登出</button></div></header>
+<main id=\"main-content\"><section class=\"auth-stage\" id=\"auth-panel\" aria-labelledby=\"auth-title\"><article class=\"auth-card\"><div class=\"auth-mark\" aria-hidden=\"true\">AE</div><p class=\"auth-tag\" id=\"registration-state\">檢查註冊狀態</p><h2 id=\"auth-title\">連接 MetaMask</h2><p id=\"auth-description\" class=\"auth-description\">正在確認這台環境的註冊狀態。</p><button id=\"wallet\" disabled>請稍候</button><p id=\"auth\" class=\"auth-note\" role=\"status\" aria-live=\"polite\"></p><p class=\"auth-footnote\">登入後可查看環境狀態、更新排程與執行紀錄。</p></article></section>
+<section class="section-block" id="trending"><div class="section-head"><div><div class="section-title"><span class="section-mark">01</span><h2>GitHub 專案即時排行</h2></div><p class="section-subtitle">唯讀查看公開排行，不會寫入候選、收藏或 ADE 管理資料。</p></div><button id="trending-refresh">重新整理</button></div>
+<div class="field-row"><label class="field">資料來源<select id="trending-source"><option value="github">GitHub Trending（全部語言）</option><option value="trendshift">Trendshift（熱門榜）</option></select></label>
+<label class="field">期間<select id="trending-since"><option value="daily">每日</option><option value="weekly">每週</option><option value="monthly">每月</option></select></label></div>
+<p id="trending-error" class="trend-error" hidden></p><p id="trending-meta" class="muted" aria-live="polite">載入排行中…</p><p id="trending-status" class="muted" aria-live="polite"></p><ol id="trending-items" class="rank-list"></ol></section>
+<div id="private" hidden><section class=\"section-block\" id=\"environment\"><div class=\"section-head\"><div><div class=\"section-title\"><span class=\"section-mark\">02</span><h2>環境總覽</h2></div><p id=\"checked\" class=\"section-subtitle\"></p></div><div class=\"row\"><strong id=\"overall\"></strong><button id=\"update-all\" disabled>全部更新</button></div></div><div id=\"components\" class=\"grid\"></div></section>
+<section class=\"section-block\" id=\"schedule-panel\"><div class=\"section-title\"><span class=\"section-mark\">03</span><h2>每日更新排程</h2></div><p id=\"schedule\"></p><p id=\"policy\" class=\"muted\"></p><div class=\"panel-actions\"><button id=\"authorize-policy\" disabled>啟用每日更新</button><button class=\"button-quiet\" id=\"disable-policy\" disabled>停用每日更新</button></div></section>
+<section class=\"section-block\" id=\"runs-panel\"><div class=\"section-title\"><span class=\"section-mark\">04</span><h2>更新執行紀錄</h2></div><div id=\"runs\" class=\"muted\"></div></section>
 </div>
 <script>
-const state = {session:null, address:null, role:null, provider:null, components:[], generation:0};
+const state = {session:null, address:null, role:null, provider:null, components:[], registrationRequired:document.body.dataset.registrationRequired === 'true', connecting:false, generation:0};
 const storageKey = 'ade.environment.session.v1';
 let sessionExpiryTimer;
+let trendingRequestId = 0;
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function remember(value) {
@@ -1156,28 +1171,55 @@ async function sign(message) {
   const hex = '0x' + Array.from(new TextEncoder().encode(message), b => b.toString(16).padStart(2,'0')).join('');
   return provider.request({method:'personal_sign', params:[hex, state.address]});
 }
+function renderAuthMode() {
+  if (state.session) {
+    $('auth-panel').hidden = true;
+    return;
+  }
+  $('auth-panel').hidden = false;
+  const registering = state.registrationRequired;
+  $('registration-state').textContent = state.connecting
+    ? 'WALLET 授權進行中'
+    : registering ? 'FIRST REGISTRATION' : 'WALLET LOGIN';
+  $('auth-title').textContent = registering ? '註冊這台環境' : '登入 ADES';
+  $('auth-description').textContent = registering
+    ? '尚未完成註冊。第一個註冊的 wallet 會成為這台環境的管理者。'
+    : '已完成首次註冊。請用已授權的 MetaMask wallet 登入。';
+  $('wallet').textContent = state.connecting
+    ? (registering ? '註冊中…' : '登入中…')
+    : (registering ? '使用 MetaMask 註冊' : '使用 MetaMask 登入');
+  $('wallet').disabled = state.connecting;
+}
 function resetWallet() {
   clearTimeout(sessionExpiryTimer);
   state.generation++;
   state.session = state.address = state.role = null;
   state.components = [];
+  state.connecting = false;
   remember(null);
-  $('auth').textContent = '請連接 MetaMask 登入。';
-  for (const id of ['private','registration','refresh','logout']) $(id).hidden = true;
-  for (const id of ['registration-status','overall','checked','components','schedule','policy','runs']) $(id).textContent = '';
+  $('auth').textContent = '';
+  $('auth').className = 'auth-note';
+  $('auth-identity').textContent = '尚未登入';
+  $('global-error').textContent = '';
+  $('global-error').hidden = true;
+  for (const id of ['private','refresh','logout','private-nav-label']) $(id).hidden = true;
+  for (const id of ['overall','checked','components','schedule','policy','runs']) $(id).textContent = '';
+  document.querySelectorAll('[data-private-nav]').forEach(link => { link.hidden = true; });
   $('overall').className = '';
-  $('wallet').textContent = 'Connect / register MetaMask';
-  $('wallet').disabled = false;
   for (const id of ['update-all','authorize-policy','disable-policy']) $(id).disabled = true;
+  renderAuthMode();
 }
 function acceptSession(session) {
   state.session = session.session;
   state.address = session.address;
   state.role = session.role;
+  state.connecting = false;
   remember(session);
   clearTimeout(sessionExpiryTimer);
   sessionExpiryTimer = setTimeout(resetWallet, Math.max(0, Date.parse(session.expires_at) - Date.now()));
-  $('auth').textContent = `${session.role} · ${session.address}`;
+  $('auth-identity').textContent = session.role + ' · ' + session.address;
+  $('auth').textContent = '';
+  renderAuthMode();
 }
 async function login() {
   const address = state.address, generation = state.generation;
@@ -1193,28 +1235,44 @@ async function login() {
   await refresh();
 }
 async function connect() {
-  if (state.session) return;
+  if (state.session || state.connecting) return;
   resetWallet();
+  state.connecting = true;
+  const generation = state.generation;
+  renderAuthMode();
+  try {
   const provider = walletObject();
   if (!provider) throw new Error('MetaMask extension not detected. Install or enable MetaMask, then reload this page.');
   attachProvider(provider);
-  const generation = state.generation;
   const accounts = await provider.request({method:'eth_requestAccounts'});
   if (state.generation !== generation) return;
   state.address = accounts[0]?.toLowerCase();
   if (!state.address) throw new Error('MetaMask did not return an account');
   let registration;
   try { registration = await json('/api/v1/registration/challenge?address=' + encodeURIComponent(state.address)); }
-  catch (error) { if (error.status !== 409) throw error; }
+  catch (error) {
+    if (error.status !== 409) throw error;
+    state.registrationRequired = false;
+  }
   if (registration) {
-    $('registration').hidden = false;
-    $('registration-status').textContent = '請在 wallet 中確認註冊簽章。';
+    state.registrationRequired = true;
+    renderAuthMode();
+    $('auth').textContent = '請在 MetaMask 確認首次註冊簽章。';
     const signature = await sign(registration.message);
+    if (state.generation !== generation) return;
     await json('/api/v1/registration', {method:'POST', body:JSON.stringify({
       challenge_id:registration.challenge_id, address:state.address, message:registration.message, signature})});
+    state.registrationRequired = false;
   }
+  renderAuthMode();
   if (state.generation !== generation) return;
   await login();
+  } finally {
+    if (state.generation === generation && !state.session) {
+      state.connecting = false;
+      renderAuthMode();
+    }
+  }
 }
 async function beginUpdate(ids) {
   if (!state.session) throw new Error('Connect a wallet first');
@@ -1233,10 +1291,11 @@ async function refresh() {
   const [health, schedule, runs] = await Promise.all([json('/api/v1/health'), json('/api/v1/schedule'), json('/api/v1/runs')]);
   if (token !== state.session) return;
   $('private').hidden = false;
-  $('registration').hidden = true;
+  $('auth-panel').hidden = true;
   $('refresh').hidden = $('logout').hidden = false;
-  $('wallet').textContent = 'Wallet connected';
-  $('wallet').disabled = true;
+  $('private-nav-label').hidden = false;
+  document.querySelectorAll('[data-private-nav]').forEach(link => { link.hidden = false; });
+  $('auth-identity').textContent = state.role + ' · ' + state.address;
   state.components = health.components || [];
   $('overall').textContent = `${health.status} · ${health.vm_id}`;
   $('overall').className = `badge ${health.status}`;
@@ -1250,7 +1309,45 @@ async function refresh() {
   $('authorize-policy').disabled = state.role !== 'admin' || !state.components.some(c => c.update_supported);
   $('disable-policy').disabled = state.role !== 'admin' || !schedule.policy_valid;
 }
-function showError(error) { $('auth').textContent = error.message; }
+function showError(error) {
+  if (state.session) {
+    $('global-error').textContent = error.message;
+    $('global-error').hidden = false;
+  } else {
+    $('auth').textContent = error.message;
+    $('auth').className = 'auth-note error';
+  }
+}
+async function loadTrending() {
+  const requestId = ++trendingRequestId;
+  const source = $('trending-source').value;
+  const since = $('trending-since').value;
+  $('trending-refresh').disabled = true;
+  $('trending-error').hidden = true;
+  $('trending-status').textContent = '載入排行中…';
+  try {
+    const data = await json(`/api/v1/trending?source=${encodeURIComponent(source)}&since=${encodeURIComponent(since)}`);
+    if (requestId !== trendingRequestId) return;
+    const sourceLink = esc(String(data.sourceUrl || ''));
+    const fetchedAt = esc(new Date(data.fetchedAt).toLocaleString('zh-TW', {hour12:false}));
+    $('trending-meta').innerHTML = `資料即時抓自 <a class="source-link" href="${sourceLink}" target="_blank" rel="noreferrer">${esc(String(data.sourceUrl || '').replace(/^https?:\\/\\//, ''))}</a> · 抓取於 ${fetchedAt}`;
+    const items = Array.isArray(data.items) ? data.items : [];
+    $('trending-items').innerHTML = items.map((item, index) => {
+      const language = item.language ? `<span class="lang">${esc(item.language)}</span>` : '';
+      const gained = Number(item.starsToday || 0);
+      const gainLine = gained > 0 ? `<span>↗ ${gained.toLocaleString('en-US')} 本期新增</span>` : '';
+      return `<li class="rank-item"><span class="rank-no">${index + 1}</span><div><div class="rank-head"><a class="repo" href="${esc(item.url)}" target="_blank" rel="noreferrer">${esc(item.fullName)}</a>${language}</div><div class="rank-meta"><span>★ ${Number(item.starsTotal || 0).toLocaleString('en-US')}</span>${gainLine}</div>${item.description ? `<p class="muted rank-desc">${esc(item.description)}</p>` : ''}</div></li>`;
+    }).join('');
+    $('trending-status').textContent = items.length ? `共 ${items.length} 個專案` : '這個資料源目前沒有可顯示的項目。';
+  } catch (error) {
+    if (requestId !== trendingRequestId) return;
+    $('trending-error').textContent = error instanceof Error ? error.message : String(error);
+    $('trending-error').hidden = false;
+    $('trending-status').textContent = $('trending-items').children.length ? '更新失敗，保留上一份排行。' : '目前無法取得排行。';
+  } finally {
+    if (requestId === trendingRequestId) $('trending-refresh').disabled = false;
+  }
+}
 async function restoreSession() {
   let saved;
   try { saved = JSON.parse(sessionStorage.getItem(storageKey)); } catch (_) {}
@@ -1279,6 +1376,11 @@ async function restoreSession() {
   }
 }
 $('wallet').onclick = () => connect().catch(showError);
+document.querySelectorAll('.side-link').forEach(link => link.addEventListener('click', () => {
+  document.querySelectorAll('.side-link').forEach(item => item.removeAttribute('aria-current'));
+  link.setAttribute('aria-current', 'page');
+}));
+renderAuthMode();
 $('refresh').onclick = () => (state.role ? refresh() : restoreSession()).catch(showError);
 $('logout').onclick = async () => {
   const token = state.session;
@@ -1287,8 +1389,15 @@ $('logout').onclick = async () => {
 $('update-all').onclick = () => beginUpdate(state.components.filter(c => c.update_supported).map(c => c.id)).catch(showError);
 $('authorize-policy').onclick = () => setPolicy(true).catch(showError);
 $('disable-policy').onclick = () => setPolicy(false).catch(showError);
+$('trending-source').onchange = () => void loadTrending();
+$('trending-since').onchange = () => void loadTrending();
+$('trending-refresh').onclick = () => void loadTrending();
+void loadTrending();
 restoreSession();
-</script></main></body></html>"""
+</script></main></div></div></body></html>""".replace(
+        "__REGISTRATION_REQUIRED__",
+        str(not bool(getattr(config, "authorized_wallets", ()))).lower(),
+    )
 
 
 def _policy_public(policy: Mapping[str, Any] | None, config: EnvironmentConfig) -> dict[str, Any]:
@@ -1338,6 +1447,7 @@ class EnvironmentHTTPServer:
         self.config = config
         self.store = RunStore(config.state_root)
         self.coordinator = UpdateCoordinator(config, self.store)
+        self.trending = TrendingService()
         self.registration_challenges: dict[str, dict[str, Any]] = {}
         self.auth_failures: dict[str, list[float]] = {}
         self.lock = threading.RLock()
@@ -1538,6 +1648,7 @@ class EnvironmentHTTPServer:
         method = handler.command
         public_routes = {
             ("GET", "/"),
+            ("GET", "/api/v1/trending"),
             ("GET", "/api/v1/auth/challenge"),
             ("POST", "/api/v1/auth/verify"),
             ("GET", "/api/v1/registration/challenge"),
@@ -1551,6 +1662,18 @@ class EnvironmentHTTPServer:
             return 200, self.session(handler)
         if method == "GET" and path == "/":
             return 200, ("text/html; charset=utf-8", dashboard_html(self.config))
+        if method == "GET" and path == "/api/v1/trending":
+            query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+            if set(query) - {"source", "since"} or any(len(values) != 1 for values in query.values()):
+                return 400, {"error": "only one source and one since value are allowed"}
+            source = query.get("source", ["github"])[0]
+            since = query.get("since", ["daily"])[0]
+            try:
+                return 200, self.trending.get(source, since)
+            except TrendingRequestError as exc:
+                return 400, {"error": str(exc)}
+            except TrendingFetchError as exc:
+                return 502, {"error": str(exc)}
         if method == "GET" and path == "/healthz":
             return 200, {
                 "status": "ok",
