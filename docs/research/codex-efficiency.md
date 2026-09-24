@@ -93,3 +93,14 @@ python3 scripts/codex_efficiency.py \
 只有完整品質與數值門檻通過，才考慮套用測得的組合。repo 的工作區 diff 是可審閱候選，個人設定另外處理；合併 prompt 未經載入試驗不能直接取代全域 AGENTS.md。
 
 若套用原生功能，只修改既有 TOML 中 `features.context_management.experimental_mode`，先保存該欄位／表格原值並確認設定未被同期修改。回復只還原本次欄位，保留其他個人設定與同期變更。此次未新增 ADE CLI、provider API 或設定 schema。
+
+## 2026-09-18：評估腳本的回歸修正
+
+Review 發現原本的 `scope_pass` 只檢查部分既有檔案，會漏掉新增檔案及 fixture 修改；trust 清理也只在正常完成時執行。新增隔離 runner 測試後，先重現這些失敗，再修正：
+
+- 每輪及獨立驗證結束後，比對完整檔案集合、類型、權限、symlink 目標與內容。第一輪保護所有原始內容；後兩輪只允許修改 `_efficiency_task/events.py` 的內容。明確允許該模組產生的正常 `__pycache__/events.cpython-*.pyc`，不忽略整個 cache 資料夾。
+- 越界變更會立即停止該 trial，記入 `scope_checks`，不能靠後續回合還原檔案而洗掉失敗紀錄。
+- 正常完成、Ctrl-C 或例外都經過 `finally` 清理，目標只限本次建立且原先沒有 trust 紀錄的工作目錄。同期修改的紀錄保持原樣，清理失敗寫入 `trial_trust_cleanup_error` 並回報錯誤。
+- 中斷時先停止子程序；若五秒內未退出，終止其 process group，避免卡住後續清理。
+
+這次以隔離 stub 驗證 runner，不呼叫真實 Codex，也不改個人設定。先前的 12 組模型試驗與約 1% 結果仍保留為歷史資料，沒有重跑或改寫測量紀錄。

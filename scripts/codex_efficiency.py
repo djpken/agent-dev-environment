@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import stat
 import statistics
 import subprocess
 import tarfile
@@ -159,10 +160,70 @@ def run_process(command, cwd, timeout, stem, prompt=None):
             process.communicate()
             return 124, time.monotonic() - started
         except BaseException:
-            os.killpg(process.pid, signal.SIGTERM)
-            process.wait()
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
             raise
     return process.returncode, time.monotonic() - started
+
+
+def workspace_snapshot(workspace):
+    """Record all entries without following links or reading special files."""
+    entries = {}
+    pending = [workspace]
+    while pending:
+        path = pending.pop()
+        mode = path.lstat().st_mode
+        permissions = stat.S_IMODE(mode)
+        name = path.relative_to(workspace).as_posix()
+        if stat.S_ISLNK(mode):
+            entries[name] = ("symlink", permissions, os.readlink(path))
+        elif stat.S_ISDIR(mode):
+            entries[name] = ("directory", permissions)
+            pending.extend(path.iterdir())
+        elif stat.S_ISREG(mode):
+            entries[name] = ("file", permissions, hashlib.sha256(path.read_bytes()).hexdigest())
+        else:
+            entries[name] = ("special", mode)
+    return entries
+
+
+def scope_changes(before, after, *, allow_edit):
+    unexpected = []
+    for name in sorted(before.keys() | after.keys()):
+        old, new = before.get(name), after.get(name)
+        if old == new:
+            continue
+        if (allow_edit and name == "_efficiency_task/events.py" and old and new
+                and old[0] == new[0] == "file" and old[1] == new[1]):
+            continue
+        # Only the tested module's normal Python bytecode is an allowed side effect.
+        kind = None
+        if name == "_efficiency_task/__pycache__":
+            kind = "directory"
+        elif re.fullmatch(r"_efficiency_task/__pycache__/events\.cpython-\d+(?:\.opt-[12])?\.pyc", name):
+            kind = "file"
+        if kind and all(value is None or value[0] == kind for value in (old, new)):
+            continue
+        unexpected.append(name)
+    return unexpected
+
+
+def check_scope(trial, workspace, baseline, stage, *, allow_edit):
+    changed = scope_changes(baseline, workspace_snapshot(workspace), allow_edit=allow_edit)
+    trial["scope_checks"].append({"stage": stage, "unexpected_paths": changed})
+    if changed:
+        trial["scope_pass"] = False
+        raise ValueError(f"{stage} changed unauthorized paths: {', '.join(changed)}")
 
 
 def fixtures(workspace):
@@ -277,65 +338,77 @@ def main():
     common = ["-m", args.model, "-c", f'model_reasoning_effort="{args.reasoning}"']
     for name in config.get("mcp_servers", {}):
         common += ["-c", f"mcp_servers.{name}.enabled=false"]
-    for repeat in range(args.repeats):
-        # Rotate arm order to reduce warm-cache/order bias; no concurrent timed runs.
-        for variant in VARIANTS[repeat % 4:] + VARIANTS[:repeat % 4]:
-            trial_dir = output / f"{repeat + 1}-{variant}"
-            workspace = trial_dir / "workspace"
-            workspace.mkdir(parents=True)
-            with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
-                tar.extractall(workspace, filter="data")
-            if variant in ("instructions", "combined"):
-                for name, content in overlays.items():
-                    target = workspace / name
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_bytes(content)
-            fixtures(workspace)
-            tracked = {p: hashlib.sha256(p.read_bytes()).hexdigest()
-                       for p in workspace.rglob("*") if p.is_file() and not p.is_symlink()
-                       and "_efficiency_task" not in p.parts}
-            options = common + ["-c", "features.context_management.experimental_mode=" +
-                                 str(variant in ("context", "combined")).lower()]
-            trial = {"variant": variant, "repeat": repeat, "turns": [], "quality_pass": False,
-                     "metrics_complete": False, "seconds": 0}
-            thread = None
-            try:
-                for turn, prompt in enumerate((FIRST, SECOND, THIRD)):
-                    if turn == 0:
-                        command = ["codex", "exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "--json"] + options + ["-"]
-                    else:
-                        command = ["codex", "exec", "resume", "--skip-git-repo-check", "--json"] + options + [thread, "-"]
-                    stem = trial_dir / f"turn-{turn + 1}"
-                    rc, seconds = run_process(command, workspace, args.timeout, stem, prompt)
-                    trial["seconds"] += seconds
-                    if rc:
-                        raise ValueError(f"turn {turn + 1} exited {rc}; see private stderr")
-                    parsed = events_result(stem.with_suffix(".stdout").read_text())
-                    if turn == 0:
-                        thread = parsed["thread"]
-                        if not thread:
-                            raise ValueError("missing thread id")
-                        trial["lookup_checks"] = check_answer(parsed["answer"], workspace)
-                    trial["turns"].append({k: v for k, v in parsed.items() if k not in ("answer", "thread")})
-                trial["code_pass"] = check_code(workspace, trial_dir / "quality")
-                trial["scope_pass"] = all(p.exists() and hashlib.sha256(p.read_bytes()).hexdigest() == digest for p, digest in tracked.items())
-                trial["quality_pass"] = all(trial["lookup_checks"].values()) and trial["code_pass"] and trial["scope_pass"]
-                trial["usage"] = session_usage(trial["turns"])
-                if config_fingerprint(config_path, output) != report["effective_config_sha256"]:
-                    raise ValueError("effective personal configuration changed during the experiment")
-                trial["metrics_complete"] = True
-            except (ValueError, OSError, KeyError, TypeError) as error:
-                trial["error"] = str(error)
-            report["trials"].append(trial)
-            report["decision"] = decision(report["trials"], args.repeats)
+    trial_workspaces = []
+    try:
+        for repeat in range(args.repeats):
+            # Rotate arm order to reduce warm-cache/order bias; no concurrent timed runs.
+            for variant in VARIANTS[repeat % 4:] + VARIANTS[:repeat % 4]:
+                trial_dir = output / f"{repeat + 1}-{variant}"
+                workspace = trial_dir / "workspace"
+                workspace.mkdir(parents=True)
+                if str(workspace) not in config.get("projects", {}):
+                    trial_workspaces.append(workspace)
+                with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+                    tar.extractall(workspace, filter="data")
+                if variant in ("instructions", "combined"):
+                    for name, content in overlays.items():
+                        target = workspace / name
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(content)
+                fixtures(workspace)
+                baseline = workspace_snapshot(workspace)
+                options = common + ["-c", "features.context_management.experimental_mode=" +
+                                     str(variant in ("context", "combined")).lower()]
+                trial = {"variant": variant, "repeat": repeat, "turns": [], "quality_pass": False,
+                         "metrics_complete": False, "seconds": 0, "scope_pass": True, "scope_checks": []}
+                thread = None
+                try:
+                    for turn, prompt in enumerate((FIRST, SECOND, THIRD)):
+                        if turn == 0:
+                            command = ["codex", "exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "--json"] + options + ["-"]
+                        else:
+                            command = ["codex", "exec", "resume", "--skip-git-repo-check", "--json"] + options + [thread, "-"]
+                        stem = trial_dir / f"turn-{turn + 1}"
+                        rc, seconds = run_process(command, workspace, args.timeout, stem, prompt)
+                        trial["seconds"] += seconds
+                        check_scope(trial, workspace, baseline, f"turn-{turn + 1}", allow_edit=turn > 0)
+                        if rc:
+                            raise ValueError(f"turn {turn + 1} exited {rc}; see private stderr")
+                        parsed = events_result(stem.with_suffix(".stdout").read_text())
+                        if turn == 0:
+                            thread = parsed["thread"]
+                            if not thread:
+                                raise ValueError("missing thread id")
+                            trial["lookup_checks"] = check_answer(parsed["answer"], workspace)
+                        trial["turns"].append({k: v for k, v in parsed.items() if k not in ("answer", "thread")})
+                    trial["code_pass"] = check_code(workspace, trial_dir / "quality")
+                    check_scope(trial, workspace, baseline, "quality", allow_edit=True)
+                    trial["quality_pass"] = all(trial["lookup_checks"].values()) and trial["code_pass"] and trial["scope_pass"]
+                    trial["usage"] = session_usage(trial["turns"])
+                    if config_fingerprint(config_path, output) != report["effective_config_sha256"]:
+                        raise ValueError("effective personal configuration changed during the experiment")
+                    trial["metrics_complete"] = True
+                except (ValueError, OSError, KeyError, TypeError) as error:
+                    trial["error"] = str(error)
+                report["trials"].append(trial)
+                report["decision"] = decision(report["trials"], args.repeats)
+                (output / "summary.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+                print(json.dumps({"variant": variant, "repeat": repeat + 1,
+                                  "quality_pass": trial["quality_pass"], "seconds": round(trial["seconds"], 2),
+                                  "usage": trial.get("usage"), "error": trial.get("error")}), flush=True)
+        print(json.dumps(report["decision"], ensure_ascii=False), flush=True)
+    except KeyboardInterrupt:
+        report["interrupted"] = True
+        raise
+    finally:
+        report["decision"] = decision(report["trials"], args.repeats)
+        try:
+            report["trial_trust_entries_removed"] = remove_trial_trust(config_path, trial_workspaces)
+        except (OSError, ValueError) as error:
+            report["trial_trust_cleanup_error"] = str(error)
+            raise
+        finally:
             (output / "summary.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
-            print(json.dumps({"variant": variant, "repeat": repeat + 1,
-                              "quality_pass": trial["quality_pass"], "seconds": round(trial["seconds"], 2),
-                              "usage": trial.get("usage"), "error": trial.get("error")}), flush=True)
-    print(json.dumps(report["decision"], ensure_ascii=False), flush=True)
-    report["trial_trust_entries_removed"] = remove_trial_trust(
-        config_path, list(output.glob("*/workspace")))
-    (output / "summary.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     return 0 if all(t["metrics_complete"] for t in report["trials"]) else 1
 
 

@@ -1099,10 +1099,10 @@ def dashboard_html(config: EnvironmentConfig) -> str:
 .section-block{margin:22px 0 0;padding:23px 25px;border:1px solid var(--line);border-radius:17px;background:#10181a}.section-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:21px}.section-title{display:flex;align-items:center;gap:11px}.section-mark{display:grid;place-items:center;width:34px;height:34px;border:1px solid #29473b;border-radius:10px;background:#172720;color:var(--accent);font-size:11px;font-weight:700}.section-subtitle{max-width:62ch;margin-top:7px;font-size:12px}.field-row{display:flex;flex-wrap:wrap;align-items:end;gap:12px}.field{display:grid;gap:6px;color:#aab9b3;font-size:12px}.field select{min-width:180px}input,select{background:#0c1315;color:var(--text);border:1px solid #3a4b4c;border-radius:9px;padding:9px 11px;max-width:100%;font:inherit}select{cursor:pointer}.rank-list{list-style:none;margin:18px 0 0;padding:0}.rank-item{display:grid;grid-template-columns:40px minmax(0,1fr);gap:13px;padding:15px 2px;border-top:1px solid #263437}.rank-no{padding-top:1px;color:#7fa991;font-size:16px;font-weight:650;font-variant-numeric:tabular-nums}.rank-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.repo,.source-link{color:var(--accent-strong);text-decoration:none}.repo{font-weight:650}.repo:hover,.source-link:hover{text-decoration:underline}.lang{border:1px solid #39494a;border-radius:6px;padding:2px 7px;color:#afc1b9;font-size:10px}.rank-meta{display:flex;flex-wrap:wrap;gap:12px;color:#91a39b;font-size:11px;margin-top:6px}.rank-desc{max-width:72ch;margin-top:6px;font-size:12px;word-break:break-word}.trend-error{font-size:12px}.muted{color:var(--muted);font-size:12px}.row{display:flex;justify-content:space-between;align-items:center;gap:14px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}.card{padding:17px;border:1px solid #29383a;border-radius:13px;background:#141e20}.card h3{margin:7px 0 8px}.card p{font-size:12px}.badge{display:inline-block;border-radius:6px;padding:3px 7px;font-size:10px;font-weight:650;letter-spacing:.02em}.healthy{background:#183528;color:#a8e6be}.degraded,.unknown{background:#3a301b;color:var(--warning)}.unhealthy{background:#46242a;color:#ffacb5}.updating{background:#233443;color:#a8c9e7}code{color:var(--accent-strong)}pre{white-space:pre-wrap;word-break:break-word;color:#c9d1d9}.notice{border-color:#695b35;background:#211e16}.panel-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:18px}
 @media(max-width:760px){.app-shell{grid-template-columns:minmax(0,1fr)}.sidebar{position:static;height:auto;padding:14px 17px 10px;border-right:0;border-bottom:1px solid var(--line)}.brand{margin:0 0 13px}.sidebar-label,.sidebar-bottom{display:none}.side-nav{display:flex;gap:5px;overflow-x:auto;padding-bottom:2px}.side-link{flex:0 0 auto;padding:8px 10px}.topbar{align-items:flex-start;padding:19px 18px 16px}.topbar-actions{gap:6px}.identity{max-width:130px}.workspace main{padding:13px 16px 44px}.auth-stage{min-height:0;padding:24px 0 34px}.auth-card{padding:27px 25px 23px}.section-block{padding:18px 16px;margin-top:15px}.section-head{flex-direction:column;align-items:stretch}.section-head>.row{align-items:flex-start}.field{flex:1}.field select{min-width:0;width:100%}.rank-item{grid-template-columns:30px minmax(0,1fr);gap:9px}}
 @media(max-width:420px){.topbar{flex-direction:column;gap:12px}.topbar-actions{width:100%;justify-content:space-between}.identity{max-width:180px}.auth-card h2{font-size:22px}.row{align-items:flex-start;flex-direction:column}}
-.global-error{max-width:300px;color:var(--danger);font-size:11px}</style></head><body data-registration-required=\"__REGISTRATION_REQUIRED__\"><a class=\"skip-link\" href=\"#main-content\">略過導覽</a><div class=\"app-shell\">
+#artifact-form label{display:block;margin:12px 0 5px;color:#aab9b3;font-size:12px}#artifact-form input{width:100%}.artifact-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.artifact-delete{padding:7px 10px;border-color:#4a5a55;background:transparent;color:#c4d0cb;font-size:12px}.global-error{max-width:300px;color:var(--danger);font-size:11px}</style></head><body data-registration-required=\"__REGISTRATION_REQUIRED__\"><a class=\"skip-link\" href=\"#main-content\">略過導覽</a><div class=\"app-shell\">
 <aside class=\"sidebar\"><a class=\"brand\" href=\"#trending\"><span class=\"brand-mark\">AE</span><span><span class=\"brand-name\">ADES</span><span class=\"brand-caption\">Environment service</span></span></a>
 <p class=\"sidebar-label\">Workspace</p><nav class=\"side-nav\" aria-label=\"主要導覽\"><a class=\"side-link\" href=\"#trending\" aria-current=\"page\"><span class=\"nav-index\">01</span><span>專案排行</span></a>
-<p class=\"sidebar-label\" id=\"private-nav-label\" hidden>管理</p><a class=\"side-link\" data-private-nav href=\"#environment\" hidden><span class=\"nav-index\">02</span><span>環境總覽</span></a><a class=\"side-link\" data-private-nav href=\"#schedule-panel\" hidden><span class=\"nav-index\">03</span><span>更新排程</span></a><a class=\"side-link\" data-private-nav href=\"#runs-panel\" hidden><span class=\"nav-index\">04</span><span>執行紀錄</span></a></nav>
+<p class=\"sidebar-label\" id=\"private-nav-label\" hidden>管理</p><a class=\"side-link\" data-private-nav href=\"#environment\" hidden><span class=\"nav-index\">02</span><span>環境總覽</span></a><a class=\"side-link\" data-private-nav href=\"#artifact-panel\" hidden><span class=\"nav-index\">03</span><span>網頁發布</span></a><a class=\"side-link\" data-private-nav href=\"#schedule-panel\" hidden><span class=\"nav-index\">04</span><span>更新排程</span></a><a class=\"side-link\" data-private-nav href=\"#runs-panel\" hidden><span class=\"nav-index\">05</span><span>執行紀錄</span></a></nav>
 <div class=\"sidebar-bottom\"><span class=\"service-dot\"></span><span>公開閱讀模式</span></div></aside>
 <div class=\"workspace\"><header class=\"topbar\"><div><p class=\"eyebrow\">ADES / PUBLIC FEED</p><h1>GitHub 專案排行</h1></div><div class=\"topbar-actions\"><span id=\"auth-identity\" class=\"identity\">尚未登入</span><span id=\"global-error\" class=\"global-error\" role=\"alert\" hidden></span><button id=\"refresh\" class=\"button-quiet\" hidden>重新整理</button><button id=\"logout\" class=\"button-quiet\" hidden>登出</button></div></header>
 <main id=\"main-content\"><section class=\"auth-stage\" id=\"auth-panel\" aria-labelledby=\"auth-title\"><article class=\"auth-card\"><div class=\"auth-mark\" aria-hidden=\"true\">AE</div><p class=\"auth-tag\" id=\"registration-state\">檢查註冊狀態</p><h2 id=\"auth-title\">連接 MetaMask</h2><p id=\"auth-description\" class=\"auth-description\">正在確認這台環境的註冊狀態。</p><button id=\"wallet\" disabled>請稍候</button><p id=\"auth\" class=\"auth-note\" role=\"status\" aria-live=\"polite\"></p><p class=\"auth-footnote\">登入後可查看環境狀態、更新排程與執行紀錄。</p></article></section>
@@ -1111,7 +1111,7 @@ def dashboard_html(config: EnvironmentConfig) -> str:
 <label class="field">期間<select id="trending-since"><option value="daily">每日</option><option value="weekly">每週</option><option value="monthly">每月</option></select></label></div>
 <p id="trending-error" class="trend-error" hidden></p><p id="trending-meta" class="muted" aria-live="polite">載入排行中…</p><p id="trending-status" class="muted" aria-live="polite"></p><ol id="trending-items" class="rank-list"></ol></section>
 <div id="private" hidden><section class=\"section-block\" id=\"environment\"><div class=\"section-head\"><div><div class=\"section-title\"><span class=\"section-mark\">02</span><h2>環境總覽</h2></div><p id=\"checked\" class=\"section-subtitle\"></p></div><div class=\"row\"><strong id=\"overall\"></strong><button id=\"update-all\" disabled>全部更新</button></div></div><div id=\"components\" class=\"grid\"></div></section>
-<section class="section-block" id="artifact-panel" hidden><h2>網頁發布</h2>
+<section class="section-block" id="artifact-panel" hidden><div class="section-head"><div><div class="section-title"><span class="section-mark">03</span><h2>網頁發布</h2></div><p class="section-subtitle">上傳 HTML 或完整資料夾，選擇首頁後發布到公開連結。</p></div></div>
 <p>發布後，持有連結的人都能開啟作品。請勿上傳密鑰或私人資料。</p>
 <p id="artifact-status" role="status" aria-live="polite"></p>
 <form id="artifact-form" hidden>
@@ -1123,8 +1123,8 @@ def dashboard_html(config: EnvironmentConfig) -> str:
 <p id="artifact-selection" class="muted">最多 200 個檔案，合計 10 MiB。資料夾會保留內部路徑。</p>
 <button id="artifact-publish" type="submit" disabled>發布網頁</button>
 </form><div id="artifacts" class="grid"></div></section>
-<section class=\"section-block\" id=\"schedule-panel\"><div class=\"section-title\"><span class=\"section-mark\">03</span><h2>每日更新排程</h2></div><p id=\"schedule\"></p><p id=\"policy\" class=\"muted\"></p><div class=\"panel-actions\"><button id=\"authorize-policy\" disabled>啟用每日更新</button><button class=\"button-quiet\" id=\"disable-policy\" disabled>停用每日更新</button></div></section>
-<section class=\"section-block\" id=\"runs-panel\"><div class=\"section-title\"><span class=\"section-mark\">04</span><h2>更新執行紀錄</h2></div><div id=\"runs\" class=\"muted\"></div></section>
+<section class=\"section-block\" id=\"schedule-panel\"><div class=\"section-title\"><span class=\"section-mark\">04</span><h2>每日更新排程</h2></div><p id=\"schedule\"></p><p id=\"policy\" class=\"muted\"></p><div class=\"panel-actions\"><button id=\"authorize-policy\" disabled>啟用每日更新</button><button class=\"button-quiet\" id=\"disable-policy\" disabled>停用每日更新</button></div></section>
+<section class=\"section-block\" id=\"runs-panel\"><div class=\"section-title\"><span class=\"section-mark\">05</span><h2>更新執行紀錄</h2></div><div id=\"runs\" class=\"muted\"></div></section>
 </div>
 <script>
 const state = {session:null, address:null, role:null, provider:null, components:[], artifacts:[], uploadFiles:[], publishing:false, publisherReady:false, registrationRequired:document.body.dataset.registrationRequired === 'true', connecting:false, generation:0};
@@ -1214,19 +1214,20 @@ function resetWallet() {
   state.generation++;
   state.session = state.address = state.role = null;
   state.components = [];
+  state.connecting = false;
   state.artifacts = [];
   state.uploadFiles = [];
   state.publisherReady = false;
   for (const id of ['artifact-name','artifact-files','artifact-folder']) $(id).value = '';
   $('artifact-entrypoint').innerHTML = '';
-  state.connecting = false;
+  $('artifact-panel').hidden = true;
   remember(null);
   $('auth').textContent = '';
   $('auth').className = 'auth-note';
   $('auth-identity').textContent = '尚未登入';
   $('global-error').textContent = '';
   $('global-error').hidden = true;
-  for (const id of ['private','refresh','logout','private-nav-label','artifact-panel']) $(id).hidden = true;
+  for (const id of ['private','refresh','logout','private-nav-label']) $(id).hidden = true;
   for (const id of ['overall','checked','components','schedule','policy','runs','artifacts','artifact-status','artifact-selection']) $(id).textContent = '';
   document.querySelectorAll('[data-private-nav]').forEach(link => { link.hidden = true; });
   $('overall').className = '';
@@ -1242,6 +1243,8 @@ function acceptSession(session) {
   clearTimeout(sessionExpiryTimer);
   sessionExpiryTimer = setTimeout(resetWallet, Math.max(0, Date.parse(session.expires_at) - Date.now()));
   $('auth-identity').textContent = session.role + ' · ' + session.address;
+  $('global-error').textContent = '';
+  $('global-error').hidden = true;
   $('auth').textContent = '';
   renderAuthMode();
 }
@@ -1319,7 +1322,9 @@ async function refresh() {
   $('auth-panel').hidden = true;
   $('refresh').hidden = $('logout').hidden = false;
   $('private-nav-label').hidden = false;
-  document.querySelectorAll('[data-private-nav]').forEach(link => { link.hidden = false; });
+  document.querySelectorAll('[data-private-nav]').forEach(link => {
+    link.hidden = link.getAttribute('href') === '#artifact-panel' && $('artifact-panel').hidden;
+  });
   $('auth-identity').textContent = state.role + ' · ' + state.address;
   state.components = health.components || [];
   $('overall').textContent = `${health.status} · ${health.vm_id}`;
@@ -1344,7 +1349,7 @@ function renderArtifacts(data) {
   $('artifact-panel').hidden = !data.enabled;
   $('artifact-form').hidden = !canPublish();
   $('artifact-status').textContent = data.error || (data.publisher_ready ? `${state.artifacts.length} 個作品` : 'publish blocked：網頁發布服務尚未就緒。');
-  $('artifacts').innerHTML = state.artifacts.map(a => `<article class="card"><h3>${esc(a.name)}</h3><p>${a.file_count} 個檔案 · ${(a.size_bytes / 1024).toFixed(1)} KiB</p><div class="panel-actions">${(a.pages || []).map(p => `<a href="${esc(p.access_url)}" target="_blank" rel="noopener noreferrer">${esc(p.entrypoint)}</a>`).join(' ')}${canPublish() ? `<button type="button" class="artifact-delete" data-name="${esc(a.name)}">刪除</button>` : ''}</div></article>`).join('') || '<p>尚未發布作品。</p>';
+  $('artifacts').innerHTML = state.artifacts.map(a => `<article class="card"><h3>${esc(a.name)}</h3><p>${a.file_count} 個檔案 · ${(a.size_bytes / 1024).toFixed(1)} KiB</p><div class="artifact-actions">${(a.pages || []).map(p => `<a href="${esc(p.access_url)}" target="_blank" rel="noopener noreferrer">${esc(p.entrypoint)}</a>`).join(' ')}${canPublish() ? `<button type="button" class="artifact-delete" data-name="${esc(a.name)}">刪除</button>` : ''}</div></article>`).join('') || '<p>尚未發布作品。</p>';
   document.querySelectorAll('.artifact-delete').forEach(button => button.onclick = () => deleteArtifact(button.dataset.name).catch(showError));
   updatePublishButton();
 }

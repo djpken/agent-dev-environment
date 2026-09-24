@@ -106,9 +106,9 @@ operator／admin 可上傳 HTML 或完整資料夾、選擇首頁、確認覆蓋
 
 ## ADES · Agent Development Environment Service
 
-ADES 是每台 VM 獨立的管理面，與 Web artifact publisher 分開。它以 allowlist 登錄 Orca、Codex、Capability provider 與 VM services，提供登入後可讀取的 health/dashboard、JSON API、session 授權的手動操作、持續生效的 Update policy 與 update history。元件可宣告 `target_version_arg`，讓核准的目標版本以 argv 傳給固定更新器；內建 Orca updater 會驗證 release manifest 的版本、大小與 SHA-512。
+ADES 是每台 VM 獨立的管理面，與 Web artifact publisher 分開。Dashboard 使用 React、TypeScript、Vite，HTTP/API service 使用 Node.js、TypeScript、Fastify，並維持原有同 origin 的 JSON API。Fastify 以固定 argv 啟動 `ade.cli environment`，Python CLI 繼續擁有 health probes、更新狀態、trending parser 與 artifact publisher；root-owned helper 繼續負責 wallet enrollment、session authorization 與更新操作。這個選擇替換 ADES 對外 HTTP 與頁面 adapter，不遷移 ADE Python runtime。ADES 以 allowlist 登錄 Orca、Codex、Capability provider 與 VM services，提供登入後可讀取的 health/dashboard、JSON API、session 授權的手動操作、持續生效的 Update policy 與 update history。元件可宣告 `target_version_arg`，讓核准的目標版本以 argv 傳給固定更新器；內建 Orca updater 會驗證 release manifest 的版本、大小與 SHA-512。
 
-Linux + systemd VM 可用 [`deploy/agent-environment/`](../deploy/agent-environment/) 安裝。預設管理面使用 HTTPS port `6790`，每日 `04:00 UTC+8` 執行更新，也就是 `20:00 UTC`；`Persistent=true` 會在 VM 錯過時間後補跑。更新由 root-owned helper 執行，Orca 與 Codex 會依 manifest 的固定 command 更新，MCP 與其他 service 只有登錄後才會被管理。
+Linux + systemd VM 可用 [`deploy/agent-environment/`](../deploy/agent-environment/) 安裝。安裝時需要 Node.js `22.12+` 與 npm，安裝器依 `web/package-lock.json` 建置 React dashboard 和 Fastify server；systemd 以 `node --jitless` 啟動管理服務，Python CLI 仍由 `uv` 執行。預設管理面使用 HTTPS port `6790`，每日 `04:00 UTC+8` 執行更新，也就是 `20:00 UTC`；`Persistent=true` 會在 VM 錯過時間後補跑。更新由 root-owned helper 執行，Orca 與 Codex 會依 manifest 的固定 command 更新，MCP 與其他 service 只有登錄後才會被管理。
 
 管理頁面也可由 Nginx 提供標準 `80／443` 入口：HTTP 首頁導向 HTTPS 管理頁面，作品維持 HTTP `80` 的獨立 origin。設定方式見 [Nginx 整合說明](../deploy/agent-environment/README.md#standard-http-and-https-entrypoints)。
 
