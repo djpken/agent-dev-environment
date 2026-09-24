@@ -8,7 +8,7 @@ uv_bin=${ADE_UV_BIN:-/home/orca/.local/bin/uv}
 [[ -x "$node_bin" ]] || { echo "Node.js executable is unavailable: $node_bin" >&2; exit 1; }
 [[ -x "$uv_bin" ]] || { echo "uv executable is unavailable: $uv_bin" >&2; exit 1; }
 [[ -f "$ADE_SOURCE_ROOT/web/dist/server.js" ]] || {
-  echo "Fastify build is missing under $ADE_SOURCE_ROOT/web/dist" >&2
+  echo "NestJS build is missing under $ADE_SOURCE_ROOT/web/dist" >&2
   exit 1
 }
 export ADE_UV_BIN="$uv_bin"

@@ -41,7 +41,7 @@ done
 source_root=$(cd "$source_root" && pwd -P)
 [[ -f "$source_root/pyproject.toml" ]] || { echo "missing pyproject.toml in $source_root" >&2; exit 1; }
 [[ -f "$source_root/web/package-lock.json" && -f "$source_root/web/src/server.ts" ]] || {
-  echo 'Fastify service sources or package lock are missing from source root' >&2
+  echo 'NestJS service sources or package lock are missing from source root' >&2
   exit 1
 }
 [[ "$public_host" =~ ^[A-Za-z0-9][A-Za-z0-9.:-]*$ ]] || { echo '--public-host contains unsupported characters' >&2; exit 2; }
@@ -60,11 +60,11 @@ if ((node_major < 22 || (node_major == 22 && node_minor < 12))); then
   exit 1
 fi
 
-# Build the UI bundle and Fastify service from the locked web dependencies.
+# Build the UI bundle and NestJS service from the locked web dependencies.
 "$npm_bin" ci --prefix "$source_root/web"
 "$npm_bin" run build --prefix "$source_root/web"
 [[ -f "$source_root/web/dist/server.js" && -f "$source_root/web/dist/ui/index.html" ]] || {
-  echo 'Fastify service build did not produce its server and UI bundle' >&2
+  echo 'NestJS service build did not produce its server and UI bundle' >&2
   exit 1
 }
 

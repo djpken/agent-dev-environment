@@ -17,7 +17,7 @@ sudo ./deploy/agent-environment/install.sh \
 ```
 
 The installer requires Node.js `22.12+` and npm. It runs `npm ci` and builds
-the React dashboard and Fastify service from `web/package-lock.json` before
+the React dashboard and NestJS service from `web/package-lock.json` before
 installing or restarting the systemd service. The production process runs as
 `orca` with Node's `--jitless` option to keep the unit's
 `MemoryDenyWriteExecute=true` restriction. Install a supported Node.js LTS
@@ -29,10 +29,18 @@ non-root dashboard service, and an HTTPS certificate for the supplied host.
 Replace the generated self-signed certificate with a trusted certificate when
 the VM is accessed through a browser wallet. The service listens on port `6790`
 by default and the existing artifact publisher remains on HTTP port `80`.
-Fastify serves the dashboard and API on port `6790`; it starts the existing
-Python `ade.cli environment` commands as child processes for health probes,
-update state, trends and artifact publication. Root-owned enrollment,
-authorization and update helpers keep their existing privilege boundary.
+NestJS uses its Express adapter and serves the dashboard and API on port `6790`.
+Controllers and providers organize the routes and management operations;
+Express handles HTTP transport, middleware and static file delivery. The service handles
+component health probes, update run state, trending retrieval and dashboard
+artifact inventory, upload and deletion directly in TypeScript. The optional
+`ade publish-html` command remains a Python publisher. Root-owned enrollment,
+authorization, policy verification and update helpers keep their privilege
+boundary. The Python `ade.cli environment` commands and Python HTTP JSON API
+remain available as compatibility paths; the production NestJS service does
+not start Python CLI child processes for those dashboard management
+operations. The ADE Python CLI and runtime continue to own installation,
+providers, host adapters, sync and scheduling.
 
 Bootstrap TLS certificates use RSA-2048 with SHA-256 for Chrome compatibility.
 Using Ed25519 for the TLS certificate
@@ -151,7 +159,7 @@ when Nginx is unavailable.
 
 ## API and dashboard
 
-The live React dashboard is served by the Fastify management service, not by `artifacts`:
+The live React dashboard is served by the NestJS management service, not by `artifacts`:
 
 ```text
 https://<vm-host>:6790/

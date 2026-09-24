@@ -166,6 +166,8 @@ class EnvironmentAuthority:
                     session = self._session(state, session_id, minimum_role)
                     if operation == "session":
                         result = session
+                    elif operation == "policy_status":
+                        result = env._policy_public(self.read_policy(), self.config)
                     elif operation == "authorize_run":
                         action, ids, targets = self._selection(request)
                         store = env.RunStore(self.config.state_root)

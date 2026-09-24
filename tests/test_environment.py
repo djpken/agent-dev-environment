@@ -167,10 +167,13 @@ class EnvironmentTests(unittest.TestCase):
                     self.assertNotIn(config.vm_id, body)
                     self.assertNotIn("components", body)
                     self.assertIsNone(error.exception.headers.get("Server"))
-        with urllib.request.urlopen(url + "/") as response:
-            shell = response.read().decode()
-            self.assertNotIn(config.vm_id, shell)
-            self.assertNotIn(str(config.source_root), shell)
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(url + "/")
+        self.assertEqual(error.exception.code, 410)
+        self.assertEqual(
+            json.loads(error.exception.read()),
+            {"error": "the Python dashboard has been retired; use the Fastify ADES service"},
+        )
         with patch.object(server.trending, "get", return_value={"source": "trendshift", "items": []}) as get_trending:
             with urllib.request.urlopen(url + "/api/v1/trending?source=trendshift&since=weekly") as response:
                 self.assertEqual(response.status, 200)
