@@ -16,12 +16,23 @@ sudo ./deploy/agent-environment/install.sh \
   --public-host vm.example.com
 ```
 
+The installer requires Node.js `22.12+` and npm. It runs `npm ci` and builds
+the React dashboard and Fastify service from `web/package-lock.json` before
+installing or restarting the systemd service. The production process runs as
+`orca` with Node's `--jitless` option to keep the unit's
+`MemoryDenyWriteExecute=true` restriction. Install a supported Node.js LTS
+release in a system path before running the installer.
+
 The installer creates a per-VM manifest at `/etc/ade/agent-environment.json`,
 state under `/var/lib/ade/agent-environment`, a root-owned update helper, a
 non-root dashboard service, and an HTTPS certificate for the supplied host.
 Replace the generated self-signed certificate with a trusted certificate when
 the VM is accessed through a browser wallet. The service listens on port `6790`
 by default and the existing artifact publisher remains on HTTP port `80`.
+Fastify serves the dashboard and API on port `6790`; it starts the existing
+Python `ade.cli environment` commands as child processes for health probes,
+update state, trends and artifact publication. Root-owned enrollment,
+authorization and update helpers keep their existing privilege boundary.
 
 Bootstrap TLS certificates use RSA-2048 with SHA-256 for Chrome compatibility.
 Using Ed25519 for the TLS certificate
@@ -88,7 +99,7 @@ paths, CLI subcommands and API identifiers remain unchanged for compatibility.
 
 ## Web publishing from the dashboard
 
-The management dashboard includes an authenticated web publishing panel. It shares
+The React management dashboard includes an authenticated web publishing panel. It shares
 storage and publication rules with `ade publish-html`; Nginx continues to serve
 published content on HTTP port 80. The dashboard and its session stay on port 6790.
 Do not serve uploaded HTML on the management origin or add the artifact origin
@@ -140,7 +151,7 @@ when Nginx is unavailable.
 
 ## API and dashboard
 
-The live dashboard is served by the management service, not by `artifacts`:
+The live React dashboard is served by the Fastify management service, not by `artifacts`:
 
 ```text
 https://<vm-host>:6790/
@@ -209,6 +220,15 @@ to create a manual run. `"action":"restart"` uses the manifest restart command.
 PUT `{"enabled":true,"components":["codex"],"allow_restart":true,"release_channel":"stable"}`
 to enable daily updates, or `{"enabled":false}` to stop them. New policies do not
 accept an expiry. The former control and policy challenge routes are removed.
+
+Operators and admins can update or restart an eligible component from its card,
+or run the action across all eligible public components. The dashboard confirms
+restarts because the component and its declared dependencies may briefly stop;
+the runner restarts dependencies first. The server validates the complete
+dependency chain against the manifest before queuing a run. While a run is
+queued or active, update and restart controls stay disabled. The run history
+refreshes automatically and shows the final status and public component results.
+Manual restart runs do not change the daily update policy.
 
 The browser UI discovers MetaMask through EIP-6963 or its injected Ethereum
 provider. The root authorization helper verifies EIP-191 login signatures and never stores wallet private keys.

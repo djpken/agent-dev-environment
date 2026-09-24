@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import core, environment, hosts, publish as html_publish, scheduler, sync
+from . import core, environment, environment_artifacts, hosts, publish as html_publish, scheduler, sync, trending
 
 
 DEFAULT_WEB_ARTIFACT_BASE_URL = "http://172.16.240.41:80"
@@ -231,6 +231,18 @@ def main():
     env_enroll_signed.add_argument("--request-json", required=True)
     env_authorize = env_sub.add_parser("authorize")
     env_authorize.add_argument("--config", type=Path, default=environment.DEFAULT_CONFIG_PATH)
+    env_trending = env_sub.add_parser("trending")
+    env_trending.add_argument("--config", type=Path, default=environment.DEFAULT_CONFIG_PATH)
+    env_trending.add_argument("--source", choices=("github", "trendshift"), default="github")
+    env_trending.add_argument("--since", choices=("daily", "weekly", "monthly"), default="daily")
+    env_artifacts = env_sub.add_parser("artifacts")
+    env_artifacts.add_argument("--config", type=Path, default=environment.DEFAULT_CONFIG_PATH)
+    env_artifacts.add_argument("artifact_operation", choices=("list", "upload", "delete"))
+    env_artifacts.add_argument("--name")
+    env_fail_run = env_sub.add_parser("fail-run")
+    env_fail_run.add_argument("--config", type=Path, default=environment.DEFAULT_CONFIG_PATH)
+    env_fail_run.add_argument("--run-id", required=True)
+    env_fail_run.add_argument("--error", required=True)
     args = parser.parse_args()
     try:
         if args.operation in ("plan", "apply"):
@@ -304,6 +316,49 @@ def main():
                     "runs": store.list(),
                     "policy": environment._policy_public(environment.read_environment_policy(config), config),
                 })
+                return 0
+            if args.environment_operation == "trending":
+                output(trending.TrendingService().get(args.source, args.since))
+                return 0
+            if args.environment_operation == "artifacts":
+                try:
+                    if args.artifact_operation == "list":
+                        output(environment_artifacts.listing(config.artifacts))
+                        return 0
+                    if args.artifact_operation == "upload":
+                        raw_request = sys.stdin.buffer.read(environment_artifacts.MAX_REQUEST_BYTES + 1)
+                        if not raw_request or len(raw_request) > environment_artifacts.MAX_REQUEST_BYTES:
+                            raise core.Error("artifact request is empty or too large")
+                        try:
+                            payload = json.loads(raw_request.decode("utf-8"))
+                        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                            raise core.Error("artifact request must be valid JSON") from exc
+                        if not isinstance(payload, dict):
+                            raise core.Error("artifact request must be a JSON object")
+                        output(environment_artifacts.upload(config.artifacts, payload))
+                        return 0
+                    if not args.name:
+                        raise core.Error("artifact name is required")
+                    output(environment_artifacts.remove(config.artifacts, args.name))
+                    return 0
+                except core.Error as exc:
+                    message = str(exc)
+                    status_code = 503 if args.artifact_operation == "list" or message.startswith("publish blocked:") else 400
+                    if args.artifact_operation == "delete" and message.startswith("artifact not found:"):
+                        status_code = 404
+                    output({"error": message, "status_code": status_code})
+                    return 1
+                except OSError:
+                    output({"error": "web artifact storage is unavailable", "status_code": 503})
+                    return 1
+            if args.environment_operation == "fail-run":
+                run = store.update(
+                    args.run_id,
+                    status="failed",
+                    finished_at=environment.iso_now(),
+                    error=environment._redact(args.error),
+                )
+                output(run)
                 return 0
             if args.environment_operation == "enroll":
                 if os.geteuid() != 0:

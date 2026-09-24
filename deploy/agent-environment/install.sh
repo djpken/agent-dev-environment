@@ -40,7 +40,33 @@ done
 [[ -n "$source_root" && "$source_root" == /* ]] || { echo '--source-root must be absolute' >&2; exit 2; }
 source_root=$(cd "$source_root" && pwd -P)
 [[ -f "$source_root/pyproject.toml" ]] || { echo "missing pyproject.toml in $source_root" >&2; exit 1; }
+[[ -f "$source_root/web/package-lock.json" && -f "$source_root/web/src/server.ts" ]] || {
+  echo 'Fastify service sources or package lock are missing from source root' >&2
+  exit 1
+}
 [[ "$public_host" =~ ^[A-Za-z0-9][A-Za-z0-9.:-]*$ ]] || { echo '--public-host contains unsupported characters' >&2; exit 2; }
+
+node_bin=$(command -v node || true)
+npm_bin=$(command -v npm || true)
+[[ -n "$node_bin" && -n "$npm_bin" ]] || {
+  echo 'Node.js 22.12+ and npm are required to install ADES' >&2
+  exit 1
+}
+node_version=$($node_bin --version)
+node_version=${node_version#v}
+IFS=. read -r node_major node_minor _ <<<"$node_version"
+if ((node_major < 22 || (node_major == 22 && node_minor < 12))); then
+  echo "Node.js 22.12+ is required; found $node_version" >&2
+  exit 1
+fi
+
+# Build the UI bundle and Fastify service from the locked web dependencies.
+"$npm_bin" ci --prefix "$source_root/web"
+"$npm_bin" run build --prefix "$source_root/web"
+[[ -f "$source_root/web/dist/server.js" && -f "$source_root/web/dist/ui/index.html" ]] || {
+  echo 'Fastify service build did not produce its server and UI bundle' >&2
+  exit 1
+}
 
 install -d -o root -g root -m 0755 /etc/ade /etc/ade/tls
 install -d -o root -g orca -m 0770 /var/lib/ade/agent-environment
@@ -57,10 +83,14 @@ config_template=$source_root/deploy/agent-environment/agent-environment.json.exa
 }
 
 escaped_source_root=$(printf '%s' "$source_root" | sed 's/[\\&|]/\\&/g')
+escaped_node_bin=$(printf '%s' "$node_bin" | sed 's/[\\&|]/\\&/g')
 temporary_env=$(mktemp /tmp/agent-environment.env.XXXXXX)
 temporary_config=$(mktemp /tmp/agent-environment.json.XXXXXX)
 trap 'rm -f -- "$temporary_env" "$temporary_config"' EXIT
-sed "s|__SOURCE_ROOT__|$escaped_source_root|g" "$source_template" >"$temporary_env"
+sed \
+  -e "s|__SOURCE_ROOT__|$escaped_source_root|g" \
+  -e "s|__NODE_BIN__|$escaped_node_bin|g" \
+  "$source_template" >"$temporary_env"
 install -o root -g root -m 0644 "$temporary_env" /etc/ade/agent-environment.env
 
 if [[ ! -f /etc/ade/agent-environment.json ]]; then

@@ -2,5 +2,16 @@
 set -Eeuo pipefail
 
 source /etc/ade/agent-environment.env
-exec /home/orca/.local/bin/uv run --frozen --project "$ADE_SOURCE_ROOT" \
-  python -m ade.cli environment service "$@"
+
+node_bin=${ADE_NODE_BIN:-/usr/bin/node}
+uv_bin=${ADE_UV_BIN:-/home/orca/.local/bin/uv}
+[[ -x "$node_bin" ]] || { echo "Node.js executable is unavailable: $node_bin" >&2; exit 1; }
+[[ -x "$uv_bin" ]] || { echo "uv executable is unavailable: $uv_bin" >&2; exit 1; }
+[[ -f "$ADE_SOURCE_ROOT/web/dist/server.js" ]] || {
+  echo "Fastify build is missing under $ADE_SOURCE_ROOT/web/dist" >&2
+  exit 1
+}
+export ADE_UV_BIN="$uv_bin"
+
+exec "$node_bin" --jitless "$ADE_SOURCE_ROOT/web/dist/server.js" \
+  "$@"

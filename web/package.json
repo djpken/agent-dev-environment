@@ -1,0 +1,30 @@
+{
+  "name": "@ade/agent-environment-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "npm run build:ui && npm run typecheck && tsc -p tsconfig.server.json",
+    "build:ui": "vite build",
+    "typecheck": "tsc -p tsconfig.client.json",
+    "start": "node --jitless dist/server.js"
+  },
+  "dependencies": {
+    "@fastify/static": "10.1.4",
+    "@fluentui/react-components": "^9.74.9",
+    "fastify": "5.12.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.0"
+  }
+}

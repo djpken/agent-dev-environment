@@ -1,4 +1,5 @@
 node_modules
+web/dist/
 .claude/worktrees
 skills/.DS_Store
 .DS_Store
