@@ -93,6 +93,11 @@ function getWalletProvider(): WalletProvider | undefined {
     (ethereum.isMetaMask && !ethereum.isRabby ? ethereum : undefined);
 }
 
+function isAppleMobileDevice(): boolean {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 function encodeMessage(message: string): string {
   const bytes = new TextEncoder().encode(message);
   let encoded = '';
@@ -150,6 +155,7 @@ function App() {
   const [registrationRequired, setRegistrationRequired] = useState<boolean | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [authMessage, setAuthMessage] = useState('');
+  const [showMetaMaskBrowserLink, setShowMetaMaskBrowserLink] = useState(false);
   const [globalError, setGlobalError] = useState('');
   const [health, setHealth] = useState<Health | null>(null);
   const [schedule, setSchedule] = useState<Schedule | null>(null);
@@ -417,10 +423,17 @@ function App() {
     const operation = ++operationRef.current;
     setConnecting(true);
     setAuthMessage('請在 MetaMask 確認連線。');
+    setShowMetaMaskBrowserLink(false);
     setGlobalError('');
     try {
       const provider = providerRef.current ?? getWalletProvider();
-      if (!provider) throw new Error('找不到 MetaMask。請安裝或啟用 MetaMask 後重新載入頁面。');
+      if (!provider) {
+        const appleMobile = isAppleMobileDevice();
+        setShowMetaMaskBrowserLink(appleMobile);
+        throw new Error(appleMobile
+          ? 'iOS 主畫面 PWA 沒有瀏覽器 wallet extension。請用下方連結在 MetaMask App 開啟 ADES。'
+          : '找不到 MetaMask。請安裝或啟用 MetaMask 後重新載入頁面。');
+      }
       attachProvider(provider);
       const accounts = await provider.request({ method: 'eth_requestAccounts' }) as string[];
       if (operationRef.current !== operation) return;
@@ -618,6 +631,9 @@ function App() {
                   : '使用已授權的 MetaMask wallet 登入，查看環境狀態與管理功能。'}</p>
               <Button appearance="primary" type="button" onClick={() => void connectWallet()} disabled={connecting}>{connecting ? '請在 MetaMask 確認…' : registrationRequired === null ? '連接 MetaMask' : registrationRequired ? '使用 MetaMask 註冊' : '使用 MetaMask 登入'}</Button>
               <p className="auth-message" role="status" aria-live="polite">{authMessage}</p>
+              {showMetaMaskBrowserLink && <a className="auth-wallet-link" href={`https://link.metamask.io/dapp/${location.host}`}>
+                在 MetaMask App 內開啟 ADES
+              </a>}
               <small>登入 session 最長有效 12 小時，登出後立即撤銷。</small>
             </article>
           </section>}
