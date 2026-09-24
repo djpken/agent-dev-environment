@@ -764,6 +764,12 @@ function App() {
   );
 }
 
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  void navigator.serviceWorker.register('/sw.js').catch((error: unknown) => {
+    console.error('PWA service worker registration failed:', error);
+  });
+}
+
 createRoot(document.getElementById('root')!).render(
   <FluentProvider theme={adeTheme} className="fluent-root">
     <React.StrictMode><App /></React.StrictMode>

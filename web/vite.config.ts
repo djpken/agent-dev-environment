@@ -7,5 +7,6 @@ export default defineConfig({
     outDir: 'dist/ui',
     emptyOutDir: true,
     assetsDir: 'assets',
+    manifest: 'asset-manifest.json',
   },
 });
