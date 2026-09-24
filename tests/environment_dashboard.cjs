@@ -11,9 +11,10 @@ let signatures = 0, revocations = 0, policyEnabled = false;
 const requests = [];
 const elements = () => new Map();
 
-function page({holdVerify=false} = {}) {
+function page({holdVerify=false, registrationRequired=false} = {}) {
   const dom = elements();
   const listeners = new Map();
+  let needsRegistration = registrationRequired;
   const provider = {
     isMetaMask:true,
     on(name, listener) { listeners.set(name, listener); },
@@ -25,7 +26,8 @@ function page({holdVerify=false} = {}) {
     },
   };
   const get = id => {
-    if (!dom.has(id)) dom.set(id, {hidden:true, disabled:true, textContent:'', innerHTML:'', className:''});
+    if (!dom.has(id)) dom.set(id, {hidden:true, disabled:true, textContent:'', innerHTML:'', className:'',
+      value:id === 'trending-source' ? 'github' : id === 'trending-since' ? 'daily' : ''});
     return dom.get(id);
   };
   let releaseVerify, verifyStarted;
@@ -33,7 +35,7 @@ function page({holdVerify=false} = {}) {
   const gate = new Promise(resolve => { releaseVerify = resolve; });
   const context = vm.createContext({
     console, TextEncoder, Date, Uint8Array, btoa:value => Buffer.from(value, 'binary').toString('base64'),
-    document:{getElementById:get, querySelectorAll:() => []},
+    document:{body:{dataset:{registrationRequired:String(registrationRequired)}}, getElementById:get, querySelectorAll:() => []},
     sessionStorage:{getItem:key => storage.get(key) || null, setItem:(key,value) => storage.set(key,value), removeItem:key => storage.delete(key)},
     setTimeout:() => 1, clearTimeout:() => {},
     Event:class {}, location:{origin:'https://vm.example'},
@@ -42,7 +44,12 @@ function page({holdVerify=false} = {}) {
       const payload = options.body ? JSON.parse(options.body) : null;
       requests.push({url, payload, headers:options.headers});
       let data = {}, status = 200;
-      if (url.startsWith('/api/v1/registration/challenge')) { status=409; data={error:'registration is already complete'}; }
+      if (url.startsWith('/api/v1/registration/challenge')) {
+        if (needsRegistration) data={challenge_id:'registration-nonce', message:'register'};
+        else { status=409; data={error:'registration is already complete'}; }
+      }
+      else if (url === '/api/v1/registration') { needsRegistration=false; data={registered:true}; }
+      else if (url.startsWith('/api/v1/trending')) data={source:'github', label:'GitHub Trending', since:'daily', sourceUrl:'https://github.com/trending?since=daily', fetchedAt:new Date().toISOString(), items:[{fullName:'owner/repo',name:'repo',author:'owner',url:'https://github.com/owner/repo',language:'Python',starsToday:12,starsTotal:1200,description:'A sample repo'}]};
       else if (url.startsWith('/api/v1/auth/challenge')) data={challenge_id:'nonce', message:'login'};
       else if (url === '/api/v1/auth/verify') {
         verifyStarted();
@@ -71,7 +78,13 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 (async () => {
   const first = page();
   await settle();
-  assert.equal(requests.length, 0, 'anonymous page must not fetch environment data');
+  assert.equal(requests.length, 1, 'anonymous page only fetches the public ranking');
+  assert.equal(requests[0].url, '/api/v1/trending?source=github&since=daily');
+  assert.equal(requests[0].headers.Authorization, undefined, 'public ranking does not require a wallet session');
+  assert.equal(first.get('trending-items').innerHTML.includes('owner/repo'), true);
+  assert.equal(first.get('auth-title').textContent, '登入 ADES');
+  assert.equal(first.get('wallet').textContent, '使用 MetaMask 登入');
+  assert.equal(first.get('auth-panel').hidden, false);
   await first.get('wallet').onclick();
   assert.equal(signatures, 1, 'normal login signs once even when MetaMask emits accountsChanged');
   assert.equal(first.get('private').hidden, false);
@@ -128,5 +141,17 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(changing.get('private').hidden, true);
   assert.equal(storage.size, 0);
   assert.equal(revocations, 3);
-  console.log('dashboard session, controls, reload, logout, and account-change checks passed');
+
+  const bootstrap = page({registrationRequired:true});
+  await settle();
+  assert.equal(bootstrap.get('auth-title').textContent, '註冊這台環境');
+  assert.equal(bootstrap.get('wallet').textContent, '使用 MetaMask 註冊');
+  const beforeRegistrationSignatures = signatures;
+  await bootstrap.get('wallet').onclick();
+  assert.equal(signatures - beforeRegistrationSignatures, 2, 'first registration signs once, then signs in once');
+  assert.equal(requests.some(request => request.url === '/api/v1/registration'), true);
+  assert.equal(bootstrap.get('auth-panel').hidden, true);
+  bootstrap.run('resetWallet()');
+  assert.equal(bootstrap.get('wallet').textContent, '使用 MetaMask 登入', 'completed registration changes the center action to login');
+  console.log('dashboard registration mode, session, controls, reload, logout, and account-change checks passed');
 })().catch(error => { console.error(error); process.exitCode=1; });

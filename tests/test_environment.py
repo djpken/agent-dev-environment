@@ -171,6 +171,17 @@ class EnvironmentTests(unittest.TestCase):
             shell = response.read().decode()
             self.assertNotIn(config.vm_id, shell)
             self.assertNotIn(str(config.source_root), shell)
+        with patch.object(server.trending, "get", return_value={"source": "trendshift", "items": []}) as get_trending:
+            with urllib.request.urlopen(url + "/api/v1/trending?source=trendshift&since=weekly") as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(json.load(response), {"source": "trendshift", "items": []})
+            get_trending.assert_called_once_with("trendshift", "weekly")
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(url + "/api/v1/trending?source=https%3A%2F%2Fexample.com")
+        self.assertEqual(error.exception.code, 400)
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(url + "/api/v1/trending?source=github&source=trendshift")
+        self.assertEqual(error.exception.code, 400)
         with urllib.request.urlopen(url + "/api/v1/auth/challenge?address=" + key.address) as response:
             challenge = json.load(response)
         self.assertNotIn(config.vm_id, json.dumps(challenge))
