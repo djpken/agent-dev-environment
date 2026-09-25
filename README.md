@@ -8,13 +8,14 @@
 
 只使用 skills：安裝現有 `.claude-plugin/plugin.json` 宣告的 Workflow Pack，plugin 名稱維持 `skills`，既有 slash commands 不變。
 
-使用完整 ADE：在本 repo 執行以下指令，將 `plan` 輸出的 ID 帶入 `apply`。
+使用完整 ADE：先建置 Go CLI，再將 `plan` 輸出的 ID 帶入 `apply`。
 
 ```bash
-uv sync --frozen
-uv run --frozen ade plan --user user.example.json
-uv run --frozen ade apply --user user.example.json --plan-id <plan_id>
-uv run --frozen ade doctor
+mkdir -p .ade/bin
+go build -o .ade/bin/ade ./cmd/ade
+.ade/bin/ade plan --user user.example.json
+.ade/bin/ade apply --user user.example.json --plan-id <plan_id>
+.ade/bin/ade doctor
 ```
 
 使用與限制見 [ADE runtime](./docs/ade-runtime.md)，其中包含 `orca serve` 與 `Local` execution profiles 的說明；SSH MCP 的 user-level 設定見 [SSH MCP 文件](./docs/ssh-mcp.md)；Plane 到 Linear 同步見 [同步文件](./docs/ade-plane-linear-sync.md)，職責分工見 [責任表](./docs/ade-responsibilities.md)。`user.example.json` 未設定 LLM endpoint，因此模型 review 會保持 blocked；credentials 不寫入 repository。
@@ -24,19 +25,16 @@ uv run --frozen ade doctor
 | 位置 | 責任 |
 | --- | --- |
 | `skills/`、`prompt/` | 工作方法、MCP 使用政策、結果處理 |
-| `ade/core.py` | Bundle、設定合併、plan/apply、rollback |
-| `ade/hosts.py` | Host 設定轉換與 workspace attach |
-| `ade/cli.py` | CLI、review adapter、sync 入口與 process lifecycle |
-| `ade/environment.py` | Per-VM agent environment health、wallet-signed controls、update runs 與 snapshot integration |
-| `ade/sync.py`、`ade/scheduler.py` | Plane 到 Linear reconciliation、local state 與 user-level schedule |
-| `deploy/agent-environment/` | Linux + systemd VM recipe、manager service 與 root-owned updater |
+| `cmd/ade/` | Go CLI 與 process lifecycle |
+| `internal/ade/` | Go composition/runtime、host adapters、sync、scheduler、ADES API 與 wallet controls |
+| `deploy/agent-environment/` | Go binary build/install、Linux + systemd VM recipe 與 root-owned helpers |
 | `ade.lock.json`、`ade/provider.schema.json` | Provider 版本、能力、權限與健康檢查契約 |
 | `tests/` | Runtime 與 host 整合驗證 |
 
-`npm` 管理 changesets；Python runtime 使用 `uv.lock`。測試指令：
+`npm` 管理 changesets 並建置 React dashboard。Go runtime 依 `go.mod` 管理相依套件。Python ADE modules 僅保留給既有行為測試；CLI、runtime、部署與 ADES API 都使用 Go。
 
 ```bash
-uv run --frozen python -m unittest discover -s tests -v
+go build ./...
 ```
 
 ## 目錄結構

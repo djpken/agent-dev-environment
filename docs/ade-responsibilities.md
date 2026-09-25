@@ -6,9 +6,9 @@ ADE 服務個人開發者，由 `agent-dev-environment` monorepo 組裝可安裝
 
 | 元件 | 擁有的責任 | 不擁有的責任 |
 | --- | --- | --- |
-| `ade/core.py` | 安裝、設定合併、grant、generation 與 rollback | Plane/Linear 業務規則 |
-| `ade/cli.py`、`ade/scheduler.py` | 手動 sync 入口、三次每日排程、user-level process manager 檔案 | API payload mapping |
-| `ade/sync.py` sync engine | assignment scope、field/status mapping、source identity、idempotency、逐筆錯誤隔離與 audit | Host-specific MCP 設定 |
+| `internal/ade/core.go` | 安裝、設定合併、grant、generation 與 rollback | Plane/Linear 業務規則 |
+| `cmd/ade/`、`internal/ade/scheduler.go` | 手動 sync 入口、三次每日排程、user-level process manager 檔案 | API payload mapping |
+| `internal/ade/sync.go` sync engine | assignment scope、field/status mapping、source identity、idempotency、逐筆錯誤隔離與 audit | Host-specific MCP 設定 |
 | `PlaneApiClient` | Plane REST endpoint、認證 header、pagination、Plane payload normalization | Linear issue identity |
 | `LinearApiClient` | Linear GraphQL request、issue create/update、workflow state 與 label lookup | 排程與 local mapping policy |
 | `SyncStateStore` | ADE local state lock、Plane 到 Linear mapping、run record | credential、完整 API payload |
@@ -45,7 +45,7 @@ Provider 的業務狀態與 adapter 的整合狀態應分開。Adapter 可保存
 
 目前 ADR-0002 定義 `/implement` 使用 Standards/Spec review，OCR variant 保有獨立契約。ADR-0006 選定 ADE 的預設 engine，尚未取代這份現行 workflow 契約，也未證實既有 forked adapter 與選定上游相容。實作遷移前需核對介面與狀態 ownership，決定後才更新 skill 行為。
 
-目前 `scripts/link-skills.sh` 仍是本機開發工具。`ade/` 已實作 lockfile、plan/apply、checksum 驗證、原子 generation 切換、rollback、設定合併、啟動授權與三種 host 的 workspace attach。原始 host 設定保留，不同內容的同名 entry 會停止接入。Bundled Workflow Pack 直接取自同 repo，內容 digest 納入 plan。
+目前 `scripts/link-skills.sh` 仍是本機開發工具。Go runtime 已實作 lockfile、plan/apply、checksum 驗證、原子 generation 切換、rollback、設定合併、啟動授權與三種 host 的 workspace attach。原始 host 設定保留，不同內容的同名 entry 會停止接入。Bundled Workflow Pack 直接取自同 repo，內容 digest 納入 plan。
 
 已實測在 ADE 專用目錄安裝 Alibaba OpenCodeReview `1.11.4`。Headroom 預設關閉，尚未安裝；LLM endpoint 與 credential 尚未設定，因此沒有執行模型 review。ADE 目前落實設定與啟動授權，外部 provider 仍須受信任；尚未提供 OS sandbox 或封包層資料出口限制。這些限制必須和 local-first 目標一起閱讀，不能將 permission manifest 視為執行期隔離保證。
 

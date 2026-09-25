@@ -6,9 +6,9 @@
 
 ### Repo 性質
 
-這是 `agent-dev-environment` monorepo。`skills/` 與 `prompt/` 擁有 Workflow Pack；`ade/` 擁有安裝、設定、provider 與 host 整合。`npm` 只用於 changesets；Python runtime 使用 `uv.lock`。
+這是 `agent-dev-environment` monorepo。`skills/` 與 `prompt/` 擁有 Workflow Pack；`cmd/ade/` 與 `internal/ade/` 提供 Go CLI、runtime、provider 與 host 整合。npm 建置 dashboard 並管理 changesets；Go runtime 使用 `go.mod`。
 
-修改 runtime、安裝流程或 host adapter 時，執行 `uv run --frozen python -m unittest discover -s tests -v`。職責調整先讀 `docs/ade-responsibilities.md`；CLI 使用與限制見 `docs/ade-runtime.md`。
+修改 runtime、安裝流程或 host adapter 時，執行 `go build ./...` 與現有 Python 行為測試 `uv run --frozen python -m unittest discover -s tests -v`。職責調整先讀 `docs/ade-responsibilities.md`；CLI 使用與限制見 `docs/ade-runtime.md`。
 
 Workflow Pack 可以描述 MCP 使用政策與工具介面；版本、credentials、process lifecycle 與重連由 runtime 或 adapter 負責。Provider 擁有業務狀態，adapter 僅保存整合所需的狀態。
 

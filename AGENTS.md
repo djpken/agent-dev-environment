@@ -4,10 +4,10 @@
 
 ## 職責與驗證
 
-- `ade/` 擁有 runtime、安裝、設定、provider 與 host 整合；`skills/`、`prompt/` 擁有 Workflow Pack。
+- `cmd/ade/` 是 Go CLI 入口；`internal/ade/` 擁有 runtime、安裝、設定、provider、host 整合與 ADES API；`skills/`、`prompt/` 擁有 Workflow Pack。
 - Runtime 與 adapter 管理版本、credentials、process lifecycle 與重連；provider 擁有業務狀態，adapter 只保存整合狀態。Workflow Pack 宣告能力與使用政策。
-- 調整職責前讀 `docs/ade-responsibilities.md`。修改 runtime、安裝流程或 host adapter 時，讀 `docs/ade-runtime.md` 並執行 `uv run --frozen python -m unittest discover -s tests -v`。
-- Python runtime 使用 `uv.lock`；npm 只用於 changesets。準備發布變更用 `npx changeset`；版本更新用 `npm run version`。
+- 調整職責前讀 `docs/ade-responsibilities.md`。修改 runtime、安裝流程或 host adapter 時，讀 `docs/ade-runtime.md`，執行 `go build ./...` 與現有 Python 行為測試 `uv run --frozen python -m unittest discover -s tests -v`。
+- Go runtime 使用 `go.mod`；npm 用於 dashboard 與 changesets。準備發布變更用 `npx changeset`；版本更新用 `npm run version`。
 
 ## 查詢與輸出效率
 

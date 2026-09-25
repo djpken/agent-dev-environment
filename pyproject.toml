@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-dev-environment"
 version = "0.1.0"
-description = "Local-first agent environment composition and lifecycle manager"
+description = "Legacy Python ADE reference used by behavior tests; production runtime is Go"
 requires-python = ">=3.11"
 dependencies = [
     "cryptography==50.0.1",
@@ -13,9 +13,6 @@ dependencies = [
     "jsonschema==4.26.0",
     "tomlkit==0.13.3",
 ]
-
-[project.scripts]
-ade = "ade.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["ade*"]

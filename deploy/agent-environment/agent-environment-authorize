@@ -8,9 +8,7 @@ export PATH
 [[ $# -eq 0 ]] || { echo 'agent-environment-authorize does not accept command arguments' >&2; exit 2; }
 
 source /etc/ade/agent-environment.env
-export UV_CACHE_DIR=/var/lib/ade/agent-environment/root-uv-cache
 
 # Bearer credentials stay on stdin, never in argv or the environment.
-exec /home/orca/.local/bin/uv run --frozen --no-sync --project "$ADE_SOURCE_ROOT" \
-  python -m ade.cli environment authorize \
+exec /usr/local/bin/ade environment authorize \
   --config /etc/ade/agent-environment.json

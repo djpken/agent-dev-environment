@@ -1,8 +1,9 @@
-"""Root-owned authentication and operation approvals for the environment service.
+"""Root-owned authentication and operation approvals for the ADES service.
 
-The HTTP process calls a fixed privileged helper over stdin. Only token hashes
-are persisted. Run history is untrusted input; an immutable, one-use approval
-binds every manual execution to a live session. Policies have a separate lifetime.
+The Node.js management server calls a fixed privileged helper over stdin. Only
+token hashes are persisted. Run history is untrusted input; an immutable,
+one-use approval binds every manual execution to a live session. Policies have
+a separate lifetime.
 """
 
 from __future__ import annotations

@@ -74,16 +74,16 @@ python3 scripts/codex_efficiency.py \
 | --- | --- |
 | [KEN-15](https://linear.app/ken-hsu/issue/KEN-15) | 原生 context management 單獨比較；設定接受與模型回覆成功不等同品質／效率驗收。 |
 | [KEN-19](https://linear.app/ken-hsu/issue/KEN-19) | 第一批實作指示精簡與按需讀取，透過實際 usage 評估。 |
-| [KEN-14](https://linear.app/ken-hsu/issue/KEN-14) | 評估 ADHD 指示的本地改編；「排名第一」缺少榜單與觀察時間，保留未解，不以人氣當效益證據。 |
+| [KEN-14](https://linear.app/ken-hsu/issue/KEN-14) | [GitHub Trending 分析](ken-14-github-trending.md)確認 2026-09-08 登上日榜第 1。痛點與低採用成本可能促成 star velocity；沒有資料能歸因到單一因素，也不把排名當成效能或品質證據。 |
 | [KEN-6](https://linear.app/ken-hsu/issue/KEN-6) | 沿用現有 ownership：Workflow Pack 管指示、host 管原生 context 功能、runtime 管 provider 安裝與 lifecycle。不建立第二套 session memory。 |
-| [KEN-7](https://linear.app/ken-hsu/issue/KEN-7) | 維持 zvec-grep integration-only candidate。Linear 留言中的舊研究檔在目前 checkout 不存在；舊稱「沒有 runtime registry」也須重新核對，不能直接沿用整份舊結論。 |
+| [KEN-7](https://linear.app/ken-hsu/issue/KEN-7) | [最新研究紀錄](ken-7-zvec-grep.md)確認 zvec-grep 是 workspace retrieval/indexing provider，暫列 integration-only candidate。ADE 已有 user-config `extensions` 接入點，但沒有 zvec-grep package installer；仍需 POC 驗證 lifecycle、安裝重現性及 index 升版回復。 |
 | [KEN-16](https://linear.app/ken-hsu/issue/KEN-16) | context-mode 留作大量輸出隔離的下一批候選。先不與原生功能或 Headroom 疊加，以免無法辨識效果來源。 |
-| [KEN-17](https://linear.app/ken-hsu/issue/KEN-17) | 瀏覽器比較延後；先明確定義代表性網頁任務，再比較既有 Orca 能力與候選工具。 |
+| [KEN-17](https://linear.app/ken-hsu/issue/KEN-17) | [ego-lite 與 camofox-browser 比較](ken-17-egolite-camofox.md)：前者共用登入狀態的桌面瀏覽器與 agent spaces；後者是 headless anti-detection server。尚未做 ADE 任務效能測試。 |
 | [KEN-18](https://linear.app/ken-hsu/issue/KEN-18) | contact sheet 延後至視覺任務試驗，需檢查小字與細節辨識是否退步。 |
 
 外部工具已完成文件與介面初查，尚未在本 VM 安裝或測量：
 
-- [zvec-grep MCP](https://github.com/zvec-ai/zvec-grep/blob/e76c89f1e0d0577713fa74b67acc882343fe982d/docs/03-mcp.md) 提供語意檢索；精確搜尋仍留給 `rg`，排名結果不取代圖譜的呼叫鏈與涵蓋範圍證據。索引與冷啟動成本須單獨記錄。
+- [zvec-grep MCP](ken-7-zvec-grep.md) 的版本、CLI／MCP 介面、索引風險與 ADE provider 邊界詳見 KEN-7 研究紀錄；精確搜尋仍留給 `rg`，排名結果不取代圖譜的呼叫鏈與涵蓋範圍證據。索引、冷啟動和升版回復成本須單獨記錄。
 - [context-mode Codex adapter](https://github.com/mksglu/context-mode/blob/8853c3cedae76b5c3325b41fb363c1cd8cf7fbca/src/adapters/codex/index.ts) 的 `canModifyArgs` 與 `canModifyOutput` 為 false。MCP 可用不代表所有 Codex 工具輸出自動被壓縮；整份 upstream routing 不宜覆蓋 ADE 的搜尋政策。
 - [context-mode benchmark](https://github.com/mksglu/context-mode/blob/8853c3cedae76b5c3325b41fb363c1cd8cf7fbca/BENCHMARK.md) 的輸出體積縮減不等於 Codex 整段任務 token 節省；本次不採用其宣傳數字作為驗收結果。
 - ADE lockfile 的 Headroom 固定為 `0.36.5`、預設關閉；不能把 upstream main 的新功能視為此固定版本已有的能力。

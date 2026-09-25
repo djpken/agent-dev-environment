@@ -1,4 +1,7 @@
-"""CLI: stdout is JSON except when forwarding a provider's protocol."""
+"""Legacy CLI retained for Python behavior tests; production ADE uses Go.
+
+The CLI stdout is JSON except when forwarding a provider's protocol.
+"""
 
 import argparse
 import json
@@ -208,12 +211,6 @@ def main():
     install_parser.add_argument("--enable", action="store_true")
     env_parser = sub.add_parser("environment")
     env_sub = env_parser.add_subparsers(dest="environment_operation", required=True)
-    env_service = env_sub.add_parser("service")
-    env_service.add_argument("--config", type=Path, default=environment.DEFAULT_CONFIG_PATH)
-    env_service.add_argument("--host")
-    env_service.add_argument("--port", type=int)
-    env_service.add_argument("--tls-cert", type=Path)
-    env_service.add_argument("--tls-key", type=Path)
     env_update = env_sub.add_parser("update")
     env_update.add_argument("--config", type=Path, default=environment.DEFAULT_CONFIG_PATH)
     env_update.add_argument("--trigger", choices=("scheduled", "manual"), default="scheduled")
@@ -288,25 +285,6 @@ def main():
                     output(EnvironmentAuthority(config).dispatch(request))
                 except (environment.EnvironmentError, json.JSONDecodeError) as exc:
                     output({"error": str(exc)})
-                return 0
-            if args.environment_operation == "service":
-                if args.host:
-                    config = environment.EnvironmentConfig(
-                        **{**config.__dict__, "listen_host": args.host}
-                    )
-                if args.port:
-                    config = environment.EnvironmentConfig(
-                        **{**config.__dict__, "listen_port": args.port}
-                    )
-                if args.tls_cert or args.tls_key:
-                    config = environment.EnvironmentConfig(
-                        **{
-                            **config.__dict__,
-                            "tls_cert": args.tls_cert or config.tls_cert,
-                            "tls_key": args.tls_key or config.tls_key,
-                        }
-                    )
-                environment.EnvironmentHTTPServer(config).serve_forever()
                 return 0
             store = environment.RunStore(config.state_root)
             if args.environment_operation == "status":

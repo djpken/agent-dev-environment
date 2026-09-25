@@ -39,9 +39,12 @@ done
 [[ $(id -u) == 0 ]] || { echo 'install.sh must run as root' >&2; exit 1; }
 [[ -n "$source_root" && "$source_root" == /* ]] || { echo '--source-root must be absolute' >&2; exit 2; }
 source_root=$(cd "$source_root" && pwd -P)
-[[ -f "$source_root/pyproject.toml" ]] || { echo "missing pyproject.toml in $source_root" >&2; exit 1; }
-[[ -f "$source_root/web/package-lock.json" && -f "$source_root/web/src/server.ts" ]] || {
-  echo 'NestJS service sources or package lock are missing from source root' >&2
+[[ -f "$source_root/go.mod" && -f "$source_root/cmd/ade/main.go" ]] || {
+  echo 'Go CLI sources or go.mod are missing from source root' >&2
+  exit 1
+}
+[[ -f "$source_root/web/package-lock.json" && -f "$source_root/web/src/client/main.tsx" ]] || {
+  echo 'dashboard sources or package lock are missing from source root' >&2
   exit 1
 }
 [[ "$public_host" =~ ^[A-Za-z0-9][A-Za-z0-9.:-]*$ ]] || { echo '--public-host contains unsupported characters' >&2; exit 2; }
@@ -60,13 +63,34 @@ if ((node_major < 22 || (node_major == 22 && node_minor < 12))); then
   exit 1
 fi
 
-# Build the UI bundle and NestJS service from the locked web dependencies.
-"$npm_bin" ci --prefix "$source_root/web"
-"$npm_bin" run build --prefix "$source_root/web"
-[[ -f "$source_root/web/dist/server.js" && -f "$source_root/web/dist/ui/index.html" ]] || {
-  echo 'NestJS service build did not produce its server and UI bundle' >&2
+go_bin=$(command -v go || true)
+if [[ -z "$go_bin" && -x /usr/local/go/bin/go ]]; then
+  go_bin=/usr/local/go/bin/go
+fi
+[[ -n "$go_bin" && -x "$go_bin" ]] || {
+  echo 'Go 1.27.1 is required to build the ADES binary' >&2
   exit 1
 }
+go_version=$($go_bin env GOVERSION)
+[[ "$go_version" == go1.27.1 ]] || {
+  echo "Go 1.27.1 is required; found $go_version" >&2
+  exit 1
+}
+
+# Build the React dashboard and the standalone Go CLI/API binary.
+"$npm_bin" ci --prefix "$source_root/web"
+"$npm_bin" run build --prefix "$source_root/web"
+[[ -f "$source_root/web/dist/ui/index.html" ]] || {
+  echo 'React dashboard build did not produce its UI bundle' >&2
+  exit 1
+}
+temporary_ade=$(mktemp /tmp/ade-binary.XXXXXX)
+trap 'rm -f -- "$temporary_ade"' EXIT
+(
+  cd "$source_root"
+  GOTOOLCHAIN=local CGO_ENABLED=0 "$go_bin" build -trimpath -ldflags='-s -w' -o "$temporary_ade" ./cmd/ade
+)
+install -o root -g root -m 0755 "$temporary_ade" /usr/local/bin/ade
 
 install -d -o root -g root -m 0755 /etc/ade /etc/ade/tls
 install -d -o root -g orca -m 0770 /var/lib/ade/agent-environment
@@ -83,13 +107,11 @@ config_template=$source_root/deploy/agent-environment/agent-environment.json.exa
 }
 
 escaped_source_root=$(printf '%s' "$source_root" | sed 's/[\\&|]/\\&/g')
-escaped_node_bin=$(printf '%s' "$node_bin" | sed 's/[\\&|]/\\&/g')
 temporary_env=$(mktemp /tmp/agent-environment.env.XXXXXX)
 temporary_config=$(mktemp /tmp/agent-environment.json.XXXXXX)
-trap 'rm -f -- "$temporary_env" "$temporary_config"' EXIT
+trap 'rm -f -- "$temporary_ade" "$temporary_env" "$temporary_config"' EXIT
 sed \
   -e "s|__SOURCE_ROOT__|$escaped_source_root|g" \
-  -e "s|__NODE_BIN__|$escaped_node_bin|g" \
   "$source_template" >"$temporary_env"
 install -o root -g root -m 0644 "$temporary_env" /etc/ade/agent-environment.env
 
@@ -111,7 +133,7 @@ if [[ ! -f /etc/ade/tls/agent-environment.crt || ! -f /etc/ade/tls/agent-environ
   fi
   temporary_key=$(mktemp /tmp/agent-environment.key.XXXXXX)
   temporary_cert=$(mktemp /tmp/agent-environment.crt.XXXXXX)
-  trap 'rm -f -- "$temporary_env" "$temporary_config" "$temporary_key" "$temporary_cert"' EXIT
+  trap 'rm -f -- "$temporary_ade" "$temporary_env" "$temporary_config" "$temporary_key" "$temporary_cert"' EXIT
   openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 365 \
     -keyout "$temporary_key" -out "$temporary_cert" \
     -subj "/CN=$public_host" -addext "subjectAltName=$san" >/dev/null 2>&1

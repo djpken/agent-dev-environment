@@ -1,12 +1,12 @@
 # Agent Development Environment
 
-個人開發者的 local-first ADE monorepo。Workflow Pack 位於同 repo 的 `skills/` 與 `prompt/`；`ade/` 管理版本、安裝、設定、provider grants、host adapter 輸出、issue sync 與 user-level schedule。
+個人開發者的 local-first ADE monorepo。Workflow Pack 位於同 repo 的 `skills/` 與 `prompt/`；Go CLI/runtime 管理版本、安裝、設定、provider grants、host adapter 輸出、issue sync 與 user-level schedule。
 
-目前為 `0.1.0`，支援 Linux/macOS、Python 3.11 以上與 Git。使用 `uv.lock` 固定 ADE 的 Python 相依。Windows 尚未實作原子 symlink 切換與 process lifecycle。
+目前為 `0.1.0`，Go runtime 支援 Linux/macOS 與 Git，使用 `go.mod` 固定 ADE 相依。Windows 尚未實作原子 symlink 切換與 process lifecycle。
 
 ## Orca 整合與 execution profiles
 
-ADE 執行環境使用 [`stablyai/orca`](https://github.com/stablyai/orca) repository 提供的 Orca execution host。本 repo 的 `ade/` 仍擁有 ADE runtime，`skills/` 與 `prompt/` 仍擁有 Workflow Pack；Orca 負責承載與連接工作負載。
+ADE 執行環境使用 [`stablyai/orca`](https://github.com/stablyai/orca) repository 提供的 Orca execution host。本 repo 的 `cmd/ade/` 與 `internal/ade/` 擁有 Go runtime，`skills/` 與 `prompt/` 擁有 Workflow Pack；Orca 負責承載與連接工作負載。
 
 目前有兩個 ADE execution profile：
 
@@ -22,12 +22,13 @@ Profile 只選擇工作負載的 execution host；兩個 profile 共用同一套
 在本 repo 執行：
 
 ```bash
-uv sync --frozen
-uv run --frozen ade plan --user user.example.json
-uv run --frozen ade apply --user user.example.json --plan-id <plan_id>
-uv run --frozen ade doctor
-uv run --frozen ade status
-uv run --frozen ade rollback
+mkdir -p .ade/bin
+go build -o .ade/bin/ade ./cmd/ade
+.ade/bin/ade plan --user user.example.json
+.ade/bin/ade apply --user user.example.json --plan-id <plan_id>
+.ade/bin/ade doctor
+.ade/bin/ade status
+.ade/bin/ade rollback
 ```
 
 `apply` 必須提供本次 `plan` 的 ID。設定、lockfile 或 current generation 改變後，舊計畫會被拒絕。下載先檢查 SHA-256，再檢查 OCR 版本；完整 stage 成功後以單次 symlink replacement 啟用。舊 generation 保留供 rollback，不清除 provider 業務資料。
@@ -41,11 +42,11 @@ uv run --frozen ade rollback
 啟用 `plane-linear-sync` 後，用 repo 外的 owner-only env file 手動執行：
 
 ```bash
-uv run --frozen ade sync --provider plane-linear-sync --env-file ~/.config/ade/plane-linear-sync.env
-uv run --frozen ade schedule install --provider plane-linear-sync --env-file ~/.config/ade/plane-linear-sync.env --enable
+.ade/bin/ade sync --provider plane-linear-sync --env-file ~/.config/ade/plane-linear-sync.env
+.ade/bin/ade schedule install --provider plane-linear-sync --env-file ~/.config/ade/plane-linear-sync.env --enable
 ```
 
-排程由 `ade/scheduler.py` 渲染 systemd user timer 或 macOS launchd，時間固定為 `08:00`、`12:00`、`17:00` 的 local timezone。排程 command 只包含 env file path，不含 token。同步的 mapping 與 JSONL run record 位於 `~/.local/share/ade/state/plane-linear-sync/`，檔案權限由 runtime 設為 owner-only。
+排程由 `internal/ade/scheduler.go` 渲染 systemd user timer 或 macOS launchd，時間固定為 `08:00`、`12:00`、`17:00` 的 local timezone。排程 command 只包含 env file path，不含 token。同步的 mapping 與 JSONL run record 位於 `~/.local/share/ade/state/plane-linear-sync/`，檔案權限由 runtime 設為 owner-only。
 
 完整欄位、狀態、credential 與錯誤規則見 [ADE Plane 到 Linear 同步](./ade-plane-linear-sync.md)。
 
@@ -67,8 +68,8 @@ Host exports 為原生設定格式，stdio entries 經 ADE wrapper 驗證 grants
 使用 `attach` 預覽並接入指定 workspace：
 
 ```bash
-uv run --frozen ade attach --host codex --workspace /path/to/project
-uv run --frozen ade attach --host codex --workspace /path/to/project --apply
+.ade/bin/ade attach --host codex --workspace /path/to/project
+.ade/bin/ade attach --host codex --workspace /path/to/project --apply
 ```
 
 `--host` 可選 `claude`、`codex`、`opencode`。Attach 合併 ADE MCP entries、保留既有無關設定，並建立指向 `current` 的 skill symlinks。Claude Code 使用 `.claude/skills`，另外兩個 host 使用 `.agents/skills`。同名 skills 或不同內容的 MCP entries 會中止整次 attach。原始 config 備份存放在 ADE 的 `attachments/`，不改寫全域 host 設定。切換 generation 後 skills 自動跟隨；provider 設定有變更時需重新 attach，衝突會明確回報。停用 provider 後，舊 stdio entry 經 wrapper 呼叫仍會拒絕執行。
@@ -89,9 +90,9 @@ export ADE_WEB_ARTIFACT_BASE_URL=http://172.16.240.41:80
 發布單檔 HTML 或 bundle：
 
 ```bash
-uv run --frozen ade publish-html publish report.html --name architecture
-uv run --frozen ade publish-html publish report-bundle/ --name architecture --entrypoint index.html
-uv run --frozen ade publish-html delete architecture
+.ade/bin/ade publish-html publish report.html --name architecture
+.ade/bin/ade publish-html publish report-bundle/ --name architecture --entrypoint index.html
+.ade/bin/ade publish-html delete architecture
 ```
 
 單檔 HTML 會以 `index.html` 作為 entrypoint；bundle 可包含 HTML、PNG、CSS 與 JS。CLI 會先檢查 `http://127.0.0.1:80/healthz`，服務不可用時回報 `publish blocked`，不把 guest path 當成 browser URL。nginx 設定樣板位於 [`deploy/ade-web-artifacts/`](../deploy/ade-web-artifacts/)。
@@ -106,9 +107,9 @@ operator／admin 可上傳 HTML 或完整資料夾、選擇首頁、確認覆蓋
 
 ## ADES · Agent Development Environment Service
 
-ADES 是每台 VM 獨立的管理面，與 Web artifact publisher 分開。Dashboard 使用 React、TypeScript、Vite；HTTP/API 使用 Node.js、TypeScript、NestJS 與 Express adapter，並維持原有同 origin 的 JSON API。NestJS controllers、providers、guards、validation pipes 與 exception filter 負責應用層組織；Express 處理 HTTP transport、middleware 與靜態檔案。TypeScript service 直接處理 component health probes、run state、trending parser 與 dashboard artifact inventory/upload/delete；root-owned helper 負責 wallet enrollment、session authorization、policy 驗證與更新操作。Python `ade.cli environment` 與 Python HTTP JSON API 保留給相容路徑，`ade publish-html` 仍由 Python publisher 執行。systemd 正式管理服務不再以 Python CLI 子程序執行上述 dashboard 管理操作。ADE Python CLI/runtime 仍負責安裝、設定、provider、host adapters、sync 與 scheduler。ADES 以 allowlist 登錄 Orca、Codex、Capability provider 與 VM services，提供登入後可讀取的 health/dashboard、JSON API、session 授權的手動操作、持續生效的 Update policy 與 update history。元件可宣告 `target_version_arg`，讓核准的目標版本以 argv 傳給固定更新器；內建 Orca updater 會驗證 release manifest 的版本、大小與 SHA-512。
+ADES 是每台 VM 獨立的管理面，與 Web artifact publisher 分開。Dashboard 使用 React、TypeScript、Vite；ADES API、ADE CLI、provider lifecycle、host adapter、sync、scheduler、wallet 授權與更新 runtime 都由 Go binary 提供。Go `net/http` server 維持既有同 origin JSON API，並直接提供 dashboard 靜態檔案。systemd、更新器與 root-owned helpers 都呼叫同一個 `/usr/local/bin/ade`，不再啟動 Python 或 Node server。Node.js 與 npm 僅在安裝時建置 React dashboard。ADES 以 allowlist 登錄 Orca、Codex、Capability provider 與 VM services，提供登入後可讀取的 health/dashboard、JSON API、session 授權的手動操作、持續生效的 Update policy 與 update history。元件可宣告 `target_version_arg`，讓核准的目標版本以 argv 傳給固定更新器；內建 Orca updater 會驗證 release manifest 的版本、大小與 SHA-512。
 
-Linux + systemd VM 可用 [`deploy/agent-environment/`](../deploy/agent-environment/) 安裝。安裝時需要 Node.js `22.12+` 與 npm，安裝器依 `web/package-lock.json` 建置 React dashboard 和 NestJS server；NestJS 使用 Express adapter，systemd 以 `node --jitless` 啟動管理服務。Python CLI 仍供 ADE runtime、Python HTTP 相容服務及更新 worker 使用。預設管理面使用 HTTPS port `6790`，每日 `04:00 UTC+8` 執行更新，也就是 `20:00 UTC`；`Persistent=true` 會在 VM 錯過時間後補跑。更新由 root-owned helper 執行，Orca 與 Codex 會依 manifest 的固定 command 更新，MCP 與其他 service 只有登錄後才會被管理。
+Linux + systemd VM 可用 [`deploy/agent-environment/`](../deploy/agent-environment/) 安裝。安裝需要 Go `1.27.1`、Node.js `22.12+` 與 npm。安裝器依 `go.mod` 編譯 Go binary，依 `web/package-lock.json` 建置 React dashboard，systemd 直接啟動 `/usr/local/bin/ade environment serve`。Go binary 同時提供 ADE CLI、管理 API 與更新 worker。預設管理面使用 HTTPS port `6790`，每日 `04:00 UTC+8` 執行更新，也就是 `20:00 UTC`；`Persistent=true` 會在 VM 錯過時間後補跑。更新由 root-owned helper 執行，Orca 與 Codex 會依 manifest 的固定 command 更新，MCP 與其他 service 只有登錄後才會被管理。
 
 管理頁面也可由 Nginx 提供標準 `80／443` 入口：HTTP 首頁導向 HTTPS 管理頁面，作品維持 HTTP `80` 的獨立 origin。設定方式見 [Nginx 整合說明](../deploy/agent-environment/README.md#standard-http-and-https-entrypoints)。
 
@@ -125,7 +126,7 @@ Admin 可啟用、修改或停用每日更新。新排程沒有到期日，登�
 先在 user config 設定明確 `llm_endpoint` 與 OCR grants，再重新 plan/apply。只有執行 review 時才從指定環境變數讀取 credential；credential 不寫入 lockfile、generation 或 CLI arguments。
 
 ```bash
-uv run --frozen ade review --workspace /path/to/repo --base <commit> --head HEAD --model <model> --key-env OCR_LLM_TOKEN
+.ade/bin/ade review --workspace /path/to/repo --base <commit> --head HEAD --model <model> --key-env OCR_LLM_TOKEN
 ```
 
 Adapter 將 refs 解析成完整 commit SHA，要求 base 為 head 的 ancestor，再呼叫 OCR range review。上游管理自己的 review sessions 與 findings。實際模型呼叫需要使用者的 endpoint、model 與 credential；安裝及測試不會發送程式碼。
@@ -148,10 +149,11 @@ OCR endpoint 由 adapter 明確傳入；第三方 provider 必須自行遵守資
 ## 驗證
 
 ```bash
+go build ./...
 uv run --frozen python -m unittest discover -s tests -v
 ```
 
-測試包含設定合併、提權阻擋、manifest 驗證、下載損壞、version mismatch、失敗保留 current、過期 plan、rollback、三種 host 設定格式、環境變數過濾、review range/endpoint mapping、Plane/Linear mapping、排程與同步錯誤隔離。
+現有 Python 行為測試涵蓋設定合併、提權阻擋、manifest 驗證、下載損壞、version mismatch、失敗保留 current、過期 plan、rollback、三種 host 設定格式、環境變數過濾、review range/endpoint mapping、Plane/Linear mapping、排程與同步錯誤隔離。Go runtime build 另由第一個命令驗證。
 
 官方介面依據：
 

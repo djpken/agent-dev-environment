@@ -1,8 +1,7 @@
-"""Per-VM agent environment management primitives.
+"""Per-VM environment primitives used by ADE's CLI and privileged helpers.
 
-The environment service deliberately keeps its control plane separate from the
-web artifact publisher.  Components are declared in a root-owned manifest and
-are executed as argv arrays; requests never carry shell commands.
+Components are declared in a root-owned manifest and are executed as argv
+arrays; update requests never carry shell commands.
 """
 
 from __future__ import annotations
@@ -18,10 +17,8 @@ import re
 import secrets
 import subprocess
 import tempfile
-import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass, field
@@ -33,9 +30,6 @@ from eth_account.messages import encode_defunct
 from eth_keys.exceptions import BadSignature
 
 from . import core, environment_artifacts
-from .trending import TrendingFetchError, TrendingRequestError, TrendingService
-
-
 ENVIRONMENT_VERSION = "1"
 DEFAULT_CONFIG_PATH = Path("/etc/ade/agent-environment.json")
 STATUS_VALUES = ("healthy", "degraded", "unhealthy", "unknown", "updating")
@@ -331,11 +325,7 @@ class EnvironmentConfig:
     vm_id: str
     source_root: Path
     state_root: Path
-    listen_host: str
-    listen_port: int
     public_origin: str
-    tls_cert: Path | None
-    tls_key: Path | None
     allowed_origins: tuple[str, ...]
     components: tuple[Component, ...]
     authorized_wallets: tuple[Mapping[str, str], ...]
@@ -355,30 +345,9 @@ class EnvironmentConfig:
         vm_id = _id(raw.get("vm_id"), "vm_id")
         source_root = Path(raw.get("source_root", ".")).expanduser().resolve()
         state_root = Path(raw.get("state_root", "/var/lib/ade/agent-environment")).expanduser().resolve()
-        listen = raw.get("listen", {})
-        if not isinstance(listen, Mapping):
-            raise EnvironmentError("listen must be an object")
-        listen_host = listen.get("host", "0.0.0.0")
-        listen_port = listen.get("port", 6790)
-        if not isinstance(listen_host, str) or not listen_host:
-            raise EnvironmentError("listen.host must be text")
-        if not isinstance(listen_port, int) or not 1 <= listen_port <= 65535:
-            raise EnvironmentError("listen.port is invalid")
         public_origin = raw.get("public_origin", "")
         if not isinstance(public_origin, str) or not public_origin.startswith(("http://", "https://")):
             raise EnvironmentError("public_origin must be an HTTP(S) origin")
-        tls = raw.get("tls", {})
-        if not isinstance(tls, Mapping):
-            raise EnvironmentError("tls must be an object")
-        tls_cert = Path(tls["cert"]).expanduser().resolve() if tls.get("cert") else None
-        tls_key = Path(tls["key"]).expanduser().resolve() if tls.get("key") else None
-        if (tls_cert is None) != (tls_key is None):
-            raise EnvironmentError("tls.cert and tls.key must be supplied together")
-        allow_http = raw.get("allow_http", False)
-        if not isinstance(allow_http, bool):
-            raise EnvironmentError("allow_http must be a boolean")
-        if listen_host not in {"127.0.0.1", "::1", "localhost"} and tls_cert is None and not allow_http:
-            raise EnvironmentError("TLS is required when the environment service is not loopback-only")
         allowed_origins = raw.get("allowed_origins", [])
         if not isinstance(allowed_origins, list) or not all(isinstance(item, str) for item in allowed_origins):
             raise EnvironmentError("allowed_origins must be a list")
@@ -422,11 +391,7 @@ class EnvironmentConfig:
             vm_id=vm_id,
             source_root=source_root,
             state_root=state_root,
-            listen_host=listen_host,
-            listen_port=listen_port,
             public_origin=public_origin.rstrip("/"),
-            tls_cert=tls_cert,
-            tls_key=tls_key,
             allowed_origins=tuple(allowed_origins),
             components=components,
             authorized_wallets=tuple(authorized),
@@ -453,7 +418,7 @@ class EnvironmentConfig:
 
 
 class RunStore:
-    """Small file-backed store shared by the unprivileged API and root updater."""
+    """Small file-backed store shared by the update worker and root helper."""
 
     def __init__(self, root: str | Path):
         self.root = Path(root).expanduser().resolve()
@@ -1122,423 +1087,3 @@ def _run_public(run: Mapping[str, Any], config: EnvironmentConfig) -> dict[str, 
     result["component_ids"] = [item for item in run.get("component_ids", []) if item in public_ids]
     result["components"] = components
     return result
-
-
-class EnvironmentHTTPServer:
-    """HTTP control plane for one VM's agent environment."""
-
-    def __init__(self, config: EnvironmentConfig):
-        self.config = config
-        self.store = RunStore(config.state_root)
-        self.coordinator = UpdateCoordinator(config, self.store)
-        self.trending = TrendingService()
-        self.registration_challenges: dict[str, dict[str, Any]] = {}
-        self.auth_failures: dict[str, list[float]] = {}
-        self.lock = threading.RLock()
-        self.httpd: Any = None
-
-    def _cleanup(self) -> None:
-        now = utc_now()
-        cutoff = time.monotonic() - 300
-        with self.lock:
-            self.registration_challenges = {
-                key: value for key, value in self.registration_challenges.items()
-                if parse_timestamp(value["expires_at"]) > now
-            }
-            self.auth_failures = {
-                key: values for key, values in self.auth_failures.items()
-                if any(value > cutoff for value in values)
-            }
-
-    def auth_allowed(self, address: str) -> bool:
-        cutoff = time.monotonic() - 300
-        with self.lock:
-            values = [value for value in self.auth_failures.get(address, []) if value > cutoff]
-            self.auth_failures[address] = values
-            return len(values) < 10
-
-    def note_auth_failure(self, address: str) -> None:
-        with self.lock:
-            values = self.auth_failures.setdefault(address, [])
-            values.append(time.monotonic())
-
-    def _authority(self, operation: str, **payload: Any) -> dict[str, Any]:
-        helper = self.config.authorization_trigger
-        if not helper.is_file() or not os.access(helper, os.X_OK):
-            raise EnvironmentError("privileged authorization helper is unavailable")
-        result = subprocess.run(
-            ["/usr/bin/sudo", "-n", str(helper)],
-            input=json.dumps({**payload, "operation": operation}),
-            capture_output=True, text=True, timeout=30, check=False,
-        )
-        if result.returncode != 0:
-            raise EnvironmentError("privileged authorization helper failed")
-        try:
-            value = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise EnvironmentError("invalid authorization helper response") from exc
-        if not isinstance(value, dict):
-            raise EnvironmentError("invalid authorization helper response")
-        if "error" in value:
-            raise EnvironmentError(value["error"])
-        return value
-
-    @staticmethod
-    def _token(handler: Any) -> str:
-        authorization = handler.headers.get("Authorization", "")
-        if not authorization.startswith("Bearer "):
-            raise EnvironmentError("wallet session required")
-        return authorization.removeprefix("Bearer ").strip()
-
-    def session(self, handler: Any, minimum_role: str = "viewer") -> dict[str, Any]:
-        value = self._authority("session", token=self._token(handler))
-        rank = {"viewer": 0, "operator": 1, "admin": 2}
-        if rank[value["role"]] < rank[minimum_role]:
-            raise EnvironmentError(f"wallet role {minimum_role} required")
-        return value
-
-    def registration_status(self) -> dict[str, Any]:
-        return {
-            "required": not bool(self.config.authorized_wallets),
-            "vm_id": self.config.vm_id,
-            "role": "admin" if not self.config.authorized_wallets else None,
-        }
-
-    def create_registration_challenge(self, address: str) -> dict[str, Any]:
-        self._cleanup()
-        if self.config.authorized_wallets:
-            raise EnvironmentError("registration is already complete")
-        address = normalize_wallet_address(address)
-        issued_at = iso_now()
-        expires_at = (utc_now() + dt.timedelta(minutes=10)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        challenge_id = str(uuid.uuid4())
-        message = registration_message(
-            self.config.vm_id,
-            address,
-            secrets.token_urlsafe(24),
-            issued_at,
-            expires_at,
-        )
-        challenge = {
-            "challenge_id": challenge_id,
-            "address": address,
-            "role": "admin",
-            "message": message,
-            "issued_at": issued_at,
-            "expires_at": expires_at,
-        }
-        with self.lock:
-            if self.config.authorized_wallets:
-                raise EnvironmentError("registration is already complete")
-            self.registration_challenges[challenge_id] = challenge
-            while len(self.registration_challenges) > 32:
-                self.registration_challenges.pop(next(iter(self.registration_challenges)))
-        return challenge
-
-    def _trigger_registration(self, address: str, message: str, signature: str) -> dict[str, Any]:
-        trigger = self.config.registration_trigger
-        if not trigger.is_file() or not os.access(trigger, os.X_OK):
-            raise EnvironmentError("wallet registration helper is unavailable")
-        request = json.dumps(
-            {"address": address, "message": message, "signature": signature},
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
-        result = subprocess.run(
-            ["/usr/bin/sudo", "-n", str(trigger)],
-            input=request,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        if result.returncode != 0:
-            detail = _redact((result.stderr or result.stdout).strip() or "registration helper failed")
-            raise EnvironmentError("wallet registration failed: " + detail)
-        try:
-            response = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise EnvironmentError("wallet registration returned an invalid response") from exc
-        if not isinstance(response, Mapping) or response.get("registered") is not True:
-            raise EnvironmentError("wallet registration was not confirmed")
-        return dict(response)
-
-    def _reload_config(self) -> None:
-        config = EnvironmentConfig.load(self.config.path)
-        with self.lock:
-            self.config = config
-            self.coordinator = UpdateCoordinator(config, self.store)
-
-    def register_wallet(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        address = normalize_wallet_address(payload.get("address"))
-        challenge_id = payload.get("challenge_id")
-        message = payload.get("message")
-        signature = payload.get("signature")
-        if not all(isinstance(item, str) for item in (address, challenge_id, message, signature)):
-            raise EnvironmentError("address, challenge_id, message, and signature are required")
-        self._cleanup()
-        with self.lock:
-            challenge = self.registration_challenges.get(challenge_id)
-        if challenge is None or challenge["address"] != address or not secrets.compare_digest(challenge["message"], message):
-            raise EnvironmentError("registration challenge is invalid")
-        valid, reason = verify_registration_request(self.config, address, message, signature)
-        if not valid:
-            raise EnvironmentError(reason)
-        self._trigger_registration(address, message, signature)
-        self._reload_config()
-        with self.lock:
-            self.registration_challenges.pop(challenge_id, None)
-        return {"registered": True, "address": address, "role": "admin", "login_required": True}
-
-    def create_auth_challenge(self, address: str, origin: str | None = None) -> dict[str, Any]:
-        return self._authority("challenge", address=address, origin=origin)
-
-    def verify_auth(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        return self._authority("login", **{key: payload.get(key) for key in
-                                         ("challenge_id", "address", "message", "signature")})
-
-    def _trigger_manual(self, run_id: str) -> None:
-        if not self.config.manual_trigger.is_file() or not os.access(self.config.manual_trigger, os.X_OK):
-            raise EnvironmentError("privileged updater trigger is unavailable")
-        subprocess.Popen(
-            ["/usr/bin/sudo", "-n", str(self.config.manual_trigger), run_id],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-
-    def start_update(self, handler: Any, payload: Mapping[str, Any]) -> dict[str, Any]:
-        run = self._authority("authorize_run", token=self._token(handler),
-                              action=payload.get("action", "update"),
-                              component_ids=payload.get("component_ids"),
-                              target_versions=payload.get("target_versions", {}))
-        try:
-            self._trigger_manual(run["id"])
-        except (EnvironmentError, OSError, subprocess.SubprocessError) as exc:
-            run = self.store.update(run["id"], status="failed", finished_at=iso_now(), error=_redact(str(exc)))
-            raise EnvironmentError(f"update run was queued but could not start: {run['error']}") from exc
-        return run
-
-    def save_policy(self, handler: Any, payload: Mapping[str, Any]) -> dict[str, Any]:
-        fields = {key: payload[key] for key in
-                  ("enabled", "components", "target_versions", "allow_restart", "release_channel", "expires_at")
-                  if key in payload}
-        return self._authority("save_policy", token=self._token(handler), **fields)
-
-    def handle(self, handler: Any) -> tuple[int, Any]:
-        parsed = urllib.parse.urlparse(handler.path)
-        path = parsed.path
-        method = handler.command
-        public_routes = {
-            ("GET", "/"),
-            ("GET", "/api/v1/trending"),
-            ("GET", "/api/v1/auth/challenge"),
-            ("POST", "/api/v1/auth/verify"),
-            ("GET", "/api/v1/registration/challenge"),
-            ("POST", "/api/v1/registration"),
-        }
-        if (method, path) not in public_routes:
-            self.session(handler)
-        if method == "POST" and path == "/api/v1/auth/logout":
-            return 200, self._authority("logout", token=self._token(handler))
-        if method == "GET" and path == "/api/v1/auth/session":
-            return 200, self.session(handler)
-        if method == "GET" and path == "/":
-            return 410, {"error": "the Python dashboard has been retired; use the Fastify ADES service"}
-        if method == "GET" and path == "/api/v1/trending":
-            query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
-            if set(query) - {"source", "since"} or any(len(values) != 1 for values in query.values()):
-                return 400, {"error": "only one source and one since value are allowed"}
-            source = query.get("source", ["github"])[0]
-            since = query.get("since", ["daily"])[0]
-            try:
-                return 200, self.trending.get(source, since)
-            except TrendingRequestError as exc:
-                return 400, {"error": str(exc)}
-            except TrendingFetchError as exc:
-                return 502, {"error": str(exc)}
-        if method == "GET" and path == "/healthz":
-            return 200, {
-                "status": "ok",
-                "service": "agent-environment",
-                "vm_id": self.config.vm_id,
-                "registration_required": not bool(self.config.authorized_wallets),
-            }
-        if method == "GET" and path == "/api/v1/health":
-            return 200, environment_health(self.config)
-        if method == "GET" and path == "/api/v1/components":
-            return 200, {"vm_id": self.config.vm_id, "components": environment_health(self.config)["components"]}
-        if path == "/api/v1/artifacts" or path.startswith("/api/v1/artifacts/"):
-            try:
-                if method == "GET" and path == "/api/v1/artifacts":
-                    return 200, environment_artifacts.listing(self.config.artifacts)
-                if method == "POST" and path == "/api/v1/artifacts":
-                    self.session(handler, "operator")
-                    return 201, environment_artifacts.upload(self.config.artifacts, handler.json_payload())
-                if method == "DELETE" and path.startswith("/api/v1/artifacts/"):
-                    self.session(handler, "operator")
-                    return 200, environment_artifacts.remove(self.config.artifacts, path.removeprefix("/api/v1/artifacts/"))
-            except core.Error as exc:
-                raise EnvironmentError(str(exc)) from exc
-            except OSError as exc:
-                raise EnvironmentError("web artifact storage is unavailable") from exc
-        if method == "GET" and path == "/api/v1/runs":
-            return 200, {"runs": [_run_public(run, self.config) for run in self.store.list()]}
-        if method == "GET" and path == "/api/v1/schedule":
-            policy = read_environment_policy(self.config)
-            public = self.config.public_config()
-            valid, reason = verify_policy(self.config, policy)
-            public["policy_valid"] = valid
-            public["policy_reason"] = reason
-            return 200, public
-        if method == "GET" and path == "/api/v1/policy":
-            return 200, _policy_public(read_environment_policy(self.config), self.config)
-        if method == "GET" and path == "/api/v1/registration/status":
-            return 200, self.registration_status()
-        if method == "GET" and path == "/api/v1/registration/challenge":
-            query = urllib.parse.parse_qs(parsed.query)
-            return 200, self.create_registration_challenge(query.get("address", [""])[0])
-        if method == "POST" and path == "/api/v1/registration":
-            return 200, self.register_wallet(handler.json_payload())
-        if method == "GET" and path == "/api/v1/auth/challenge":
-            query = urllib.parse.parse_qs(parsed.query)
-            return 200, self.create_auth_challenge(query.get("address", [""])[0], query.get("origin", [None])[0])
-        if method == "POST" and path == "/api/v1/auth/verify":
-            return 200, self.verify_auth(handler.json_payload())
-        if method == "POST" and path == "/api/v1/update-runs":
-            return 202, self.start_update(handler, handler.json_payload())
-        if method == "PUT" and path == "/api/v1/policy":
-            return 200, self.save_policy(handler, handler.json_payload())
-        raise EnvironmentError("route not found")
-
-    def serve_forever(self) -> None:
-        import ssl
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-        app = self
-
-        class Handler(BaseHTTPRequestHandler):
-            protocol_version = "HTTP/1.1"
-            server_version = ""
-            sys_version = ""
-
-            def json_payload(self) -> Mapping[str, Any]:
-                try:
-                    length = int(self.headers.get("Content-Length", "0"))
-                except ValueError as exc:
-                    raise EnvironmentError("invalid content length") from exc
-                limit = environment_artifacts.MAX_REQUEST_BYTES if self.command == "POST" and self.path == "/api/v1/artifacts" else 64 * 1024
-                if length <= 0 or length > limit:
-                    raise EnvironmentError("JSON request body is too large or empty")
-                try:
-                    value = json.loads(self.rfile.read(length).decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                    raise EnvironmentError("request body must be valid JSON") from exc
-                if not isinstance(value, Mapping):
-                    raise EnvironmentError("request body must be a JSON object")
-                return value
-
-            def origin_allowed(self) -> bool:
-                origin = self.headers.get("Origin")
-                if not origin:
-                    return True
-                return origin in app.config.allowed_origins or origin == app.config.public_origin or "*" in app.config.allowed_origins
-
-            def send_value(self, status: int, value: Any) -> None:
-                # Rejected uploads may leave unread bytes; never reuse that connection.
-                self.close_connection = True
-                if value is None:
-                    body = b""
-                    content_type = "text/plain; charset=utf-8"
-                elif isinstance(value, tuple):
-                    content_type, text = value
-                    body = text.encode("utf-8")
-                else:
-                    content_type = "application/json; charset=utf-8"
-                    body = json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")
-                self.send_response_only(status)
-                self.send_header("Content-Type", content_type)
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Connection", "close")
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("X-Content-Type-Options", "nosniff")
-                self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'")
-                origin = self.headers.get("Origin")
-                if origin and self.origin_allowed():
-                    self.send_header("Access-Control-Allow-Origin", origin)
-                    self.send_header("Vary", "Origin")
-                self.end_headers()
-                if body:
-                    self.wfile.write(body)
-
-            def dispatch(self) -> None:
-                if not self.origin_allowed():
-                    self.send_value(403, {"error": "origin is not allowed"})
-                    return
-                if self.path.split("?", 1)[0] == "/api/v1/auth/verify" and not app.auth_allowed(self.client_address[0]):
-                    self.send_value(429, {"error": "too many authentication failures"})
-                    return
-                try:
-                    status, value = app.handle(self)
-                    self.send_value(status, value)
-                except EnvironmentError as exc:
-                    if self.path.split("?", 1)[0] == "/api/v1/auth/verify":
-                        app.note_auth_failure(self.client_address[0])
-                    message = str(exc)
-                    status = 404 if message == "route not found" else 400
-                    if "registration is already complete" in message:
-                        status = 409
-                    if "role" in message or "session" in message or "enrolled" in message:
-                        status = 401 if "session" in message or "enrolled" in message else 403
-                    self.send_value(status, {"error": message})
-                except Exception:  # pragma: no cover - last-resort boundary
-                    self.send_value(500, {"error": "internal server error"})
-
-            def do_GET(self) -> None:
-                self.dispatch()
-
-            def do_POST(self) -> None:
-                self.dispatch()
-
-            def do_PUT(self) -> None:
-                self.dispatch()
-
-            def do_DELETE(self) -> None:
-                self.dispatch()
-
-            def do_OPTIONS(self) -> None:
-                if not self.origin_allowed():
-                    self.send_value(403, {"error": "origin is not allowed"})
-                    return
-                self.send_response_only(204)
-                self.send_header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-                self.send_header("Access-Control-Allow-Headers", "Content-Type,Authorization")
-                self.send_header("Access-Control-Max-Age", "600")
-                origin = self.headers.get("Origin")
-                if origin:
-                    self.send_header("Access-Control-Allow-Origin", origin)
-                    self.send_header("Vary", "Origin")
-                self.end_headers()
-
-            def log_message(self, format: str, *args: Any) -> None:
-                print(f"[agent-environment] {self.address_string()} {format % args}", flush=True)
-
-        httpd = ThreadingHTTPServer((self.config.listen_host, self.config.listen_port), Handler)
-        httpd.daemon_threads = True
-        if self.config.tls_cert and self.config.tls_key:
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.minimum_version = ssl.TLSVersion.TLSv1_2
-            context.load_cert_chain(str(self.config.tls_cert), str(self.config.tls_key))
-            httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
-        self.httpd = httpd
-        print(f"agent-environment listening on {self.config.public_origin}", flush=True)
-        if not self.config.authorized_wallets:
-            print(
-                f"registration required: connect a MetaMask at {self.config.public_origin}/",
-                flush=True,
-            )
-        try:
-            httpd.serve_forever()
-        finally:
-            httpd.server_close()

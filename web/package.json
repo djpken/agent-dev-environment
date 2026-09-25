@@ -7,35 +7,22 @@
     "node": ">=22.12"
   },
   "scripts": {
-    "build": "npm run build:ui && npm run typecheck && tsc -p tsconfig.server.json",
+    "build": "npm run build:ui && npm run typecheck",
     "build:ui": "vite build",
-    "typecheck": "tsc -p tsconfig.client.json",
-    "start": "node --jitless dist/server.js"
+    "typecheck": "tsc -p tsconfig.client.json"
   },
   "dependencies": {
     "@fluentui/react-components": "^9.74.9",
     "@metamask/connect-evm": "^2.1.1",
-    "@nestjs/common": "^11.2.6",
-    "@nestjs/core": "^11.2.6",
-    "@nestjs/platform-express": "^11.2.6",
-    "class-transformer": "^0.5.1",
-    "class-validator": "^0.15.1",
-    "entities": "^6.0.1",
     "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.3",
     "@types/node": "26.6.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.1",
     "typescript": "7.0.2",
     "vite": "8.3.0"
-  },
-  "overrides": {
-    "uuid": "^11.1.1"
   }
 }

@@ -16,12 +16,10 @@ sudo ./deploy/agent-environment/install.sh \
   --public-host vm.example.com
 ```
 
-The installer requires Node.js `22.12+` and npm. It runs `npm ci` and builds
-the React dashboard and NestJS service from `web/package-lock.json` before
-installing or restarting the systemd service. The production process runs as
-`orca` with Node's `--jitless` option to keep the unit's
-`MemoryDenyWriteExecute=true` restriction. Install a supported Node.js LTS
-release in a system path before running the installer.
+The installer requires Go `1.27.1`, Node.js `22.12+`, and npm. It compiles the
+Go ADE binary and runs `npm ci` to build the React dashboard before installing
+or restarting the systemd service. Node.js is only needed during dashboard
+builds; the installed API and runtime use the Go binary.
 
 The installer creates a per-VM manifest at `/etc/ade/agent-environment.json`,
 state under `/var/lib/ade/agent-environment`, a root-owned update helper, a
@@ -29,18 +27,11 @@ non-root dashboard service, and an HTTPS certificate for the supplied host.
 Replace the generated self-signed certificate with a trusted certificate when
 the VM is accessed through a browser wallet. The service listens on port `6790`
 by default and the existing artifact publisher remains on HTTP port `80`.
-NestJS uses its Express adapter and serves the dashboard and API on port `6790`.
-Controllers and providers organize the routes and management operations;
-Express handles HTTP transport, middleware and static file delivery. The service handles
-component health probes, update run state, trending retrieval and dashboard
-artifact inventory, upload and deletion directly in TypeScript. The optional
-`ade publish-html` command remains a Python publisher. Root-owned enrollment,
-authorization, policy verification and update helpers keep their privilege
-boundary. The Python `ade.cli environment` commands and Python HTTP JSON API
-remain available as compatibility paths; the production NestJS service does
-not start Python CLI child processes for those dashboard management
-operations. The ADE Python CLI and runtime continue to own installation,
-providers, host adapters, sync and scheduling.
+`/usr/local/bin/ade` is a standalone Go binary that owns the ADE CLI, provider
+lifecycle, host adapters, sync, scheduling, ADES HTTP API, wallet authorization,
+and update runtime. systemd and the root-owned helpers call this binary
+directly. The React dashboard remains TypeScript and is served by the Go
+management API.
 
 Bootstrap TLS certificates use RSA-2048 with SHA-256 for Chrome compatibility.
 Using Ed25519 for the TLS certificate
@@ -90,9 +81,9 @@ readiness and any unrelated routes.
 
 Set `public_origin` to `https://172.16.240.41` in the environment manifest.
 For an HTTP backend use `tls: {}` and `allow_http: true`; the public TLS connection
-terminates at Nginx. Add the old port 6790 origin to `allowed_origins` only if that
-entrypoint is intentionally retained. A loopback-only backend can instead use
-`listen.host: "127.0.0.1"`. Do not add the HTTP port 80 artifact origin to the
+terminates at Nginx. Add the direct port 6790 browser origin to `allowed_origins`
+only when users will access that origin. A loopback-only backend can use
+`listen.host: "127.0.0.1"`. Keep the HTTP port 80 artifact origin out of the
 management allowlist. The proxy accepts 15 MiB JSON bodies, matching the upload API.
 
 Back up the live Nginx and environment configuration, run `nginx -t`, restart
@@ -102,8 +93,9 @@ origin requires signing in again, while the enrolled wallet and update policies
 are preserved. Reverting the saved configurations and reloading/restarting the
 same services restores the previous entrypoint.
 
-The product name is ADES. Existing `agent-environment.service`, configuration
-paths, CLI subcommands and API identifiers remain unchanged for compatibility.
+The product name is ADES. The `agent-environment.service` unit, configuration
+paths and API identifiers remain stable. The Go listener runs through
+`ade environment serve`.
 
 ## Web publishing from the dashboard
 
@@ -159,7 +151,7 @@ when Nginx is unavailable.
 
 ## API and dashboard
 
-The live React dashboard is served by the NestJS management service, not by `artifacts`:
+The live React dashboard is served by the Go management service, not by `artifacts`:
 
 ```text
 https://<vm-host>:6790/
@@ -249,7 +241,7 @@ explicit in the root-owned manifest for additional wallet changes.
 Bootstrap the first wallet from the VM console with its public Ethereum address:
 
 ```bash
-sudo uv run --frozen --project /opt/ade python -m ade.cli environment enroll \
+sudo /usr/local/bin/ade environment enroll \
   --config /etc/ade/agent-environment.json \
   --address <0x-ethereum-address> \
   --role admin
@@ -320,7 +312,8 @@ restart `agent-environment.service`. The installer preserves the manifest and
 certificates. The helper path has a runtime default, so existing manifests do
 not need a new field. Existing in-memory sessions are not migrated: log in once
 after upgrading. Root helpers execute the configured source checkout; that
-checkout and its Python environment are trusted deployment code.
+checkout supplies the dashboard assets and is trusted deployment code; root
+helpers execute the installed Go binary.
 
 ## HTTP over company VPN or Tailscale
 

@@ -4,12 +4,14 @@ KEN-9 的同步由 ADE runtime 啟動，Plane 與 Linear API client 各自維護
 
 ## 啟用
 
-`user.json` 只放 provider 選擇與 grant。先複製範本，再把 `plane-linear-sync` 設為 `true`：
+`user.json` 只放 provider 選擇與 grant。先建置 Go CLI、複製範本，再把 `plane-linear-sync` 設為 `true`：
 
 ```bash
 cp user.example.json user.json
-uv run --frozen ade plan --user user.json
-uv run --frozen ade apply --user user.json --plan-id <plan_id>
+mkdir -p .ade/bin
+go build -o .ade/bin/ade ./cmd/ade
+.ade/bin/ade plan --user user.json
+.ade/bin/ade apply --user user.json --plan-id <plan_id>
 ```
 
 同步 credential 與連線設定放在 repo 外的 owner-only env file，例如 `~/.config/ade/plane-linear-sync.env`，權限必須是 `0600`：
@@ -28,13 +30,13 @@ LINEAR_TEAM_ID=<Linear team id>
 手動執行：
 
 ```bash
-uv run --frozen ade sync --provider plane-linear-sync --env-file ~/.config/ade/plane-linear-sync.env
+.ade/bin/ade sync --provider plane-linear-sync --env-file ~/.config/ade/plane-linear-sync.env
 ```
 
 `doctor` 可以檢查 credential 是否已提供，但不會發送 API request：
 
 ```bash
-uv run --frozen ade doctor --env-file ~/.config/ade/plane-linear-sync.env
+.ade/bin/ade doctor --env-file ~/.config/ade/plane-linear-sync.env
 ```
 
 ## 排程
@@ -42,7 +44,7 @@ uv run --frozen ade doctor --env-file ~/.config/ade/plane-linear-sync.env
 provider manifest 宣告每日三個 local time：`08:00`、`12:00`、`17:00`。ADE runtime 依 host 產生 user-level scheduler 檔案：Linux 使用 systemd user timer，macOS 使用 launchd。排程執行的 command 只包含 env file 路徑，不包含 token。
 
 ```bash
-uv run --frozen ade schedule install \
+.ade/bin/ade schedule install \
   --provider plane-linear-sync \
   --env-file ~/.config/ade/plane-linear-sync.env \
   --enable

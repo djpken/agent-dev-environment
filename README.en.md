@@ -9,28 +9,25 @@ A local-first agent development environment for individual developers. This mono
 Install only the existing `skills` plugin, or use the full ADE CLI from this repository:
 
 ```bash
-uv sync --frozen
-uv run --frozen ade plan --user user.example.json
-uv run --frozen ade apply --user user.example.json --plan-id <plan_id>
-uv run --frozen ade doctor
-uv run --frozen python -m unittest discover -s tests -v
+mkdir -p .ade/bin
+go build -o .ade/bin/ade ./cmd/ade
+.ade/bin/ade plan --user user.example.json
+.ade/bin/ade apply --user user.example.json --plan-id <plan_id>
+.ade/bin/ade doctor
 ```
 
 The plan ID covers the bundled workflow contents. Skills and prompts are captured from this repository, while external provider versions remain locked. Model review stays blocked until an explicit endpoint and credentials are configured. Existing skill names and the plugin identity remain unchanged.
 
-See the [runtime guide](./docs/ade-runtime.md), [user-level SSH MCP setup](./docs/ssh-mcp.md), [Plane-to-Linear sync](./docs/ade-plane-linear-sync.md), and [responsibility boundaries](./docs/ade-responsibilities.md). Python runtime code lives in `ade/`; workflows remain in `skills/` and `prompt/`. npm is used only for changesets.
+See the [runtime guide](./docs/ade-runtime.md), [user-level SSH MCP setup](./docs/ssh-mcp.md), [Plane-to-Linear sync](./docs/ade-plane-linear-sync.md), and [responsibility boundaries](./docs/ade-responsibilities.md). ADE CLI, runtime, deployment, and ADES API use Go; the dashboard remains React/TypeScript. Python ADE modules remain only for the existing behavior test suite. npm builds the dashboard and manages changesets.
 
 ## Module boundaries
 
 | Location | Responsibility |
 | --- | --- |
 | `skills/`, `prompt/` | Workflow policies and prompts |
-| `ade/core.py` | Bundling, composition, plan/apply, and rollback |
-| `ade/hosts.py` | Host configuration and workspace attachment |
-| `ade/cli.py` | CLI, review adapter, sync entry point, and process lifecycle |
-| `ade/environment.py` | Per-VM agent environment health, wallet-signed controls, update runs, and snapshot integration |
-| `ade/sync.py`, `ade/scheduler.py` | Plane-to-Linear reconciliation, local state, and user-level schedules |
-| `deploy/agent-environment/` | Linux + systemd VM recipe, manager service, and root-owned updater |
+| `cmd/ade/` | Go CLI and process lifecycle |
+| `internal/ade/` | Go composition/runtime, host adapters, sync, scheduler, ADES API, and wallet controls |
+| `deploy/agent-environment/` | Go binary installation, Linux + systemd VM recipe, and root-owned helpers |
 | `ade.lock.json`, `ade/provider.schema.json` | Provider versions, capabilities, permissions, and health contracts |
 | `tests/` | Runtime, host, sync, and scheduler verification |
 
