@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+repository_url=https://github.com/djpken/agent-dev-environment.git
+state_dir=/var/lib/ade-agent-environment-cd
+repository_dir=$state_dir/repository.git
+deployments_dir=/home/orca/.local/share/ade-deployments
+npm_cache_dir=/home/orca/.cache/agent-environment-cd/npm
+environment_file=/etc/ade/agent-environment.env
+service_name=agent-environment.service
+health_url=http://127.0.0.1:6790/
+
+[[ $(id -u) == 0 ]] || { echo 'agent-environment-cd-pull must run as root' >&2; exit 1; }
+[[ -d /etc/ade && -f "$environment_file" ]] || {
+  echo "ADE is not installed: $environment_file is missing" >&2
+  exit 1
+}
+
+install -d -o root -g root -m 0700 "$state_dir"
+install -d -o orca -g orca -m 0700 "$deployments_dir" "$npm_cache_dir"
+exec 9>"$state_dir/pull.lock"
+flock -n 9 || exit 0
+
+if [[ ! -d "$repository_dir" ]]; then
+  git init --bare "$repository_dir" >/dev/null
+  git --git-dir="$repository_dir" remote add origin "$repository_url"
+else
+  git --git-dir="$repository_dir" remote set-url origin "$repository_url"
+fi
+
+git --git-dir="$repository_dir" fetch --quiet --no-tags origin \
+  '+refs/heads/main:refs/remotes/origin/main' \
+  '+refs/heads/deploy:refs/remotes/origin/deploy'
+
+target_sha=$(git --git-dir="$repository_dir" rev-parse 'refs/remotes/origin/deploy^{commit}')
+[[ "$target_sha" =~ ^[0-9a-f]{40}$ ]] || {
+  echo "invalid deployment commit: $target_sha" >&2
+  exit 1
+}
+if ! git --git-dir="$repository_dir" merge-base --is-ancestor \
+  "$target_sha" refs/remotes/origin/main; then
+  echo "deployment commit $target_sha is not reachable from main; refusing deployment" >&2
+  exit 1
+fi
+
+release_dir=$deployments_dir/$target_sha
+current_sha=$(cat "$state_dir/deployed-sha" 2>/dev/null || true)
+current_source=$(awk -F= '$1 == "ADE_SOURCE_ROOT" { sub(/^[^=]*=/, ""); print; exit }' "$environment_file")
+release_ready() {
+  [[ -f "$release_dir/web/dist/server.js" && -f "$release_dir/web/dist/ui/index.html" ]]
+}
+
+if [[ "$current_sha" == "$target_sha" && "$current_source" == "$release_dir" ]] && release_ready; then
+  exit 0
+fi
+
+if [[ "$current_source" == "$release_dir" ]] && release_ready; then
+  if curl --fail --silent --show-error --max-time 8 -o /dev/null "$health_url"; then
+    printf '%s\n' "$target_sha" >"$state_dir/deployed-sha"
+    echo "Recorded already-running deployment $target_sha"
+    exit 0
+  fi
+fi
+
+staging_dir=
+old_environment=
+candidate_environment=
+environment_updated=0
+deployment_succeeded=0
+
+cleanup() {
+  local status=$?
+  trap - EXIT
+
+  if ((environment_updated && !deployment_succeeded)); then
+    echo 'Deployment failed; restoring the previous ADE source and restarting the service' >&2
+    if [[ -n "$old_environment" && -f "$old_environment" ]]; then
+      install -o root -g root -m 0644 "$old_environment" "$environment_file" || true
+      systemctl restart "$service_name" || true
+    fi
+  fi
+
+  if [[ -n "$staging_dir" && -d "$staging_dir" ]]; then
+    rm -rf -- "$staging_dir"
+  fi
+  [[ -z "$old_environment" ]] || rm -f -- "$old_environment"
+  [[ -z "$candidate_environment" ]] || rm -f -- "$candidate_environment"
+  exit "$status"
+}
+trap cleanup EXIT
+
+if [[ -L "$release_dir" ]]; then
+  echo "deployment directory is a symlink: $release_dir" >&2
+  exit 1
+fi
+
+if ! release_ready; then
+  if [[ -e "$release_dir" ]]; then
+    rm -rf -- "$release_dir"
+  fi
+
+  staging_dir=$(mktemp -d "$deployments_dir/.cd-${target_sha:0:12}.XXXXXX")
+  git --git-dir="$repository_dir" archive "$target_sha" | tar -x -C "$staging_dir"
+  chown -R orca:orca "$staging_dir"
+
+  if [[ -f "$staging_dir/go.mod" ]]; then
+    echo 'This deployment target contains a Go runtime; the installed VM deploy adapter currently supports the Node service on main.' >&2
+    exit 1
+  fi
+  [[ -f "$staging_dir/web/package-lock.json" && -f "$staging_dir/web/src/server.ts" ]] || {
+    echo "Node service sources are missing from $target_sha" >&2
+    exit 1
+  }
+
+  npm_bin=$(command -v npm)
+  runuser -u orca -- env \
+    HOME=/home/orca \
+    PATH="$PATH" \
+    npm_config_cache="$npm_cache_dir" \
+    "$npm_bin" ci --prefix "$staging_dir/web"
+  runuser -u orca -- env \
+    HOME=/home/orca \
+    PATH="$PATH" \
+    npm_config_cache="$npm_cache_dir" \
+    "$npm_bin" run build --prefix "$staging_dir/web"
+
+  [[ -f "$staging_dir/web/dist/server.js" && -f "$staging_dir/web/dist/ui/index.html" ]] || {
+    echo "Node service build did not produce the expected server and UI for $target_sha" >&2
+    exit 1
+  }
+  mv -- "$staging_dir" "$release_dir"
+  staging_dir=
+fi
+
+old_environment=$(mktemp)
+candidate_environment=$(mktemp)
+cp --preserve=mode,ownership "$environment_file" "$old_environment"
+chmod 0600 "$old_environment"
+awk -v source_root="$release_dir" '
+  /^ADE_SOURCE_ROOT=/ {
+    if (!replaced++) print "ADE_SOURCE_ROOT=" source_root
+    next
+  }
+  { print }
+  END {
+    if (!replaced) print "ADE_SOURCE_ROOT=" source_root
+  }
+' "$environment_file" >"$candidate_environment"
+install -o root -g root -m 0644 "$candidate_environment" "$environment_file"
+environment_updated=1
+
+systemctl restart "$service_name"
+
+healthy=0
+for attempt in $(seq 1 30); do
+  if curl --fail --silent --show-error --max-time 5 -o /dev/null "$health_url" 2>/dev/null; then
+    healthy=1
+    break
+  fi
+  sleep 2
+done
+if (( ! healthy )); then
+  echo "health check failed at $health_url after deploying $target_sha" >&2
+  exit 1
+fi
+
+printf '%s\n' "$target_sha" >"$state_dir/deployed-sha"
+chmod 0600 "$state_dir/deployed-sha"
+deployment_succeeded=1
+echo "Deployed $target_sha to $release_dir"
