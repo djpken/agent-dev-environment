@@ -40,9 +40,16 @@ jobs:
       - name: Check bubblewrap namespace support
         run: |
           stat -c '%A %U:%G %n' "$(command -v bwrap)"
-          bwrap --unshare-all --die-with-parent --new-session \
-            --ro-bind /usr /usr --proc /proc --dev /dev --tmpfs /tmp \
-            -- /usr/bin/true
+          args=(--unshare-all --die-with-parent --new-session --ro-bind /usr /usr)
+          for name in bin lib lib64; do
+            path="/$name"
+            if [[ -L "$path" ]]; then
+              args+=(--symlink "$(readlink "$path")" "$path")
+            elif [[ -e "$path" ]]; then
+              args+=(--ro-bind "$path" "$path")
+            fi
+          done
+          bwrap "${args[@]}" --proc /proc --dev /dev --tmpfs /tmp -- /usr/bin/true
 
       - name: Run Python tests
         run: uv run --frozen python -m unittest discover -s tests -v
