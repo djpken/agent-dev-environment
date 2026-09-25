@@ -69,7 +69,7 @@ class ApiError extends Error {
 const SESSION_KEY = 'ade.environment.session.v1';
 const MAX_UPLOAD_FILES = 200;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-const METAMASK_CONNECT_RPC_URL = import.meta.env.VITE_METAMASK_CONNECT_RPC_URL || 'https://ethereum-rpc.publicnode.com';
+const METAMASK_CONNECT_RPC_URL = 'https://ethereum-rpc.publicnode.com';
 let metaMaskConnectClientPromise: Promise<MetamaskConnectEVM> | undefined;
 
 function getMetaMaskConnectClient(): Promise<MetamaskConnectEVM> {

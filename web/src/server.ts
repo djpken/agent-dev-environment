@@ -71,7 +71,7 @@ async function startServer(): Promise<void> {
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader(
       'Content-Security-Policy',
-      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://ethereum-rpc.publicnode.com wss://mm-sdk-relay.api.cx.metamask.io; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
     );
     if (request.url.startsWith('/assets/')) {
       response.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
@@ -127,7 +127,7 @@ async function startServer(): Promise<void> {
       response.setHeader('Referrer-Policy', 'no-referrer');
       response.setHeader(
         'Content-Security-Policy',
-        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://ethereum-rpc.publicnode.com wss://mm-sdk-relay.api.cx.metamask.io; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
       );
       response.setHeader(
         'Cache-Control',
