@@ -14,9 +14,6 @@
     "key": "/etc/ade/tls/agent-environment.key"
   },
   "allowed_origins": [],
-  "wallets": {
-    "authorized": []
-  },
   "schedule": {
     "time": "04:00",
     "timezone": "UTC+8",
@@ -29,7 +26,6 @@
     "base_url": "http://__PUBLIC_HOST__:80"
   },
   "manual_trigger": "/usr/local/sbin/agent-environment-trigger",
-  "registration_trigger": "/usr/local/sbin/agent-environment-enroll",
   "components": [
     {
       "id": "orca",

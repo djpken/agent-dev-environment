@@ -39,16 +39,11 @@ class EnvironmentTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.addCleanup(self.temp.cleanup)
 
-    def authenticate(self, config, key):
+    def authenticate(self, config, key=None, role="admin"):
         authority = EnvironmentAuthority(config)
-        challenge = authority.dispatch({"operation": "challenge", "address": key.address})
-        auth = authority.dispatch({
-            "operation": "login",
-            "address": key.address,
-            "challenge_id": challenge["challenge_id"],
-            "message": challenge["message"],
-            "signature": "0x" + key.sign_message(encode_defunct(text=challenge["message"])).signature.hex(),
-        })
+        authority.set_account("admin", "test-password-long-enough", role)
+        auth = authority.dispatch({"operation": "login", "username": "ADMIN",
+                                   "password": "test-password-long-enough"})
         return authority, auth
 
     def config(self, components, wallets=None, snapshot=None):
@@ -108,52 +103,34 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(config.public_origin, "https://vm-test.example:6790")
         self.assertFalse(hasattr(config, "listen_host"))
 
-    def test_login_rejects_tampering_replay_expiry_and_unlisted_origin(self):
-        key = Account.create()
-        config = self.config([{"id": "service", "health": {"type": "command", "command": ["/bin/true"]}}],
-                             wallets=[{"address": key.address, "role": "admin"}])
-        authority = EnvironmentAuthority(replace(config, allowed_origins=("http://100.64.0.1:6790",)))
-        with self.assertRaisesRegex(EnvironmentError, "origin is not allowed"):
-            authority.dispatch({"operation": "challenge", "address": key.address, "origin": "http://attacker.example"})
-        challenge = authority.dispatch({"operation": "challenge", "address": key.address, "origin": "http://100.64.0.1:6790"})
-        self.assertIn('"origin":"http://100.64.0.1:6790"', challenge["message"])
-        self.assertIn('"vm_binding":', challenge["message"])
-        self.assertNotIn(config.vm_id, challenge["message"])
-        binding = challenge["message"].split('"vm_binding":"', 1)[1].split('"', 1)[0]
-        payload = {"address": key.address, "challenge_id": challenge["challenge_id"],
-                   "message": challenge["message"],
-                   "signature": "0x" + key.sign_message(encode_defunct(text=challenge["message"])).signature.hex()}
-        for altered in (challenge["message"] + "extra", challenge["message"].replace(binding, "different-binding")):
-            with self.assertRaisesRegex(EnvironmentError, "authentication challenge is invalid"):
-                authority.dispatch({**payload, "operation": "login", "message": altered})
-        self.assertEqual(authority.dispatch({**payload, "operation": "login"})["role"], "admin")
-        with self.assertRaisesRegex(EnvironmentError, "authentication challenge is invalid"):
-            authority.dispatch({**payload, "operation": "login"})
-        challenge = authority.dispatch({"operation": "challenge", "address": key.address})
-        with patch("ade.environment.utc_now", return_value=utc_now() + dt.timedelta(minutes=11)):
-            with self.assertRaisesRegex(EnvironmentError, "authentication challenge is invalid"):
-                authority.dispatch({**payload, "operation": "login", "challenge_id": challenge["challenge_id"], "message": challenge["message"]})
-
-    def test_login_challenge_is_consumed_once_under_concurrency(self):
-        key = Account.create()
-        config = self.config([{"id": "service", "health": {"type": "command", "command": ["/bin/true"]}}],
-                             wallets=[{"address": key.address, "role": "admin"}])
+    def test_password_login_normalizes_username_and_rejects_invalid_credentials(self):
+        config = self.config([{"id": "service", "health": {"type": "command", "command": ["/bin/true"]}}])
         authority = EnvironmentAuthority(config)
-        challenge = authority.dispatch({"operation": "challenge", "address": key.address})
-        payload = {"address": key.address, "challenge_id": challenge["challenge_id"],
-                   "message": challenge["message"],
-                   "signature": "0x" + key.sign_message(encode_defunct(text=challenge["message"])).signature.hex()}
+        authority.set_account("Admin.User", "test-password-long-enough")
+        login = authority.dispatch({"operation": "login", "username": "ADMIN.USER",
+                                    "password": "test-password-long-enough"})
+        self.assertEqual(login["username"], "admin.user")
+        self.assertEqual(login["role"], "admin")
+        for username, password in (("admin.user", "incorrect-password"), ("unknown", "test-password-long-enough")):
+            with self.subTest(username=username), self.assertRaisesRegex(EnvironmentError, "invalid credentials"):
+                authority.dispatch({"operation": "login", "username": username, "password": password})
+
+    def test_password_logins_can_run_concurrently(self):
+        config = self.config([{"id": "service", "health": {"type": "command", "command": ["/bin/true"]}}])
+        authority = EnvironmentAuthority(config)
+        authority.set_account("admin", "test-password-long-enough")
         barrier = threading.Barrier(2)
         def login():
             barrier.wait(timeout=3)
             try:
-                return authority.dispatch({**payload, "operation": "login"})
+                return authority.dispatch({"operation": "login", "username": "admin",
+                                           "password": "test-password-long-enough"})
             except EnvironmentError:
                 return None
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(lambda _: login(), range(2)))
-        self.assertEqual(sum(result is not None for result in results), 1)
-        self.assertEqual(len(authority._load()["sessions"]), 1)
+        self.assertEqual(sum(result is not None for result in results), 2)
+        self.assertEqual(len(authority._load()["sessions"]), 2)
 
     def test_health_and_snapshot_are_sanitized(self):
         version = self.root / "VERSION"
@@ -234,7 +211,7 @@ class EnvironmentTests(unittest.TestCase):
         store = RunStore(config.state_root)
         key = Account.create()
         config = replace(config, authorized_wallets=({"address": key.address.lower(), "role": "operator"},))
-        authority, auth = self.authenticate(config, key)
+        authority, auth = self.authenticate(config, key, role="operator")
         run = authority.dispatch({"operation": "authorize_run", "token": auth["session"],
                                   "component_ids": ["dependent"]})
         result = UpdateCoordinator(config, store).execute(run["id"])
@@ -268,7 +245,7 @@ class EnvironmentTests(unittest.TestCase):
         policy["vm_id"] = "other-vm"
         self.assertFalse(verify_policy(config, policy)[0])
 
-    def test_wallet_session_authorizes_updates_without_another_signature(self):
+    def test_password_session_authorizes_updates_without_reauthentication(self):
         key = Account.create()
         address = key.address.lower()
         config = self.config(
@@ -282,7 +259,7 @@ class EnvironmentTests(unittest.TestCase):
             ],
             wallets=[{"address": address, "role": "operator"}],
         )
-        authority, auth = self.authenticate(config, key)
+        authority, auth = self.authenticate(config, key, role="operator")
         run = authority.dispatch({
             "operation": "authorize_run", "token": auth["session"],
             "action": "update", "component_ids": ["codex"], "target_versions": {"codex": "0.154.0"}
@@ -314,25 +291,25 @@ class EnvironmentTests(unittest.TestCase):
         store = RunStore(config.state_root)
         key = Account.create()
         config = replace(config, authorized_wallets=({"address": key.address.lower(), "role": "operator"},))
-        authority, auth = self.authenticate(config, key)
+        authority, auth = self.authenticate(config, key, role="operator")
         run = authority.dispatch({"operation": "authorize_run", "token": auth["session"],
                                   "component_ids": ["codex"], "target_versions": {"codex": "0.154.0"}})
         result = UpdateCoordinator(config, store).execute(run["id"])
         self.assertEqual(result["status"], "completed")
         self.assertEqual(arguments.read_text(encoding="utf-8"), "--release 0.154.0")
 
-    def session_config(self, key, role="admin"):
+    def session_config(self, key=None, role="admin"):
         return self.config([{
             "id": "codex", "update_command": ["/bin/true"],
             "restart_command": ["/bin/true"], "target_version_arg": "--release",
             "health": {"type": "command", "command": ["/bin/true"]},
-        }], wallets=[{"address": key.address, "role": role}])
+        }])
 
     def test_all_controls_use_one_login_and_tokens_are_not_persisted(self):
         key = Account.create()
         config = self.session_config(key)
         authority, auth = self.authenticate(config, key)
-        # Any further wallet verification would violate the session contract.
+        # Wallet signatures are not part of password-session authorization.
         with patch("ade.environment.verify_wallet_signature", side_effect=AssertionError("unexpected wallet signature")):
             for action in ("update", "restart"):
                 run = authority.dispatch({"operation": "authorize_run", "token": auth["session"],
@@ -342,28 +319,25 @@ class EnvironmentTests(unittest.TestCase):
                                          "components": ["codex"]})
             self.assertTrue(policy["valid"])
             self.assertIsNone(policy["expires_at"])
-            self.assertEqual(authority.dispatch({"operation": "session", "token": auth["session"]})["address"],
-                             key.address.lower())
+            self.assertEqual(authority.dispatch({"operation": "session", "token": auth["session"]})["username"],
+                             "admin")
         self.assertNotIn(auth["session"], authority.state_path.read_text())
         self.assertEqual(authority.state_path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(authority.accounts_path.stat().st_mode & 0o777, 0o600)
 
-    def test_roles_cannot_be_elevated_by_request_payload(self):
+    def test_account_role_cannot_be_elevated_and_password_rotation_revokes_sessions(self):
         key = Account.create()
         config = self.session_config(key, "viewer")
-        authority, auth = self.authenticate(config, key)
-        with self.assertRaisesRegex(EnvironmentError, "role operator required"):
+        authority, auth = self.authenticate(config, key, role="viewer")
+        with self.assertRaisesRegex(EnvironmentError, "account role operator required"):
             authority.dispatch({"operation": "authorize_run", "token": auth["session"],
                                 "component_ids": ["codex"], "role": "admin"})
-        with self.assertRaisesRegex(EnvironmentError, "role admin required"):
+        with self.assertRaisesRegex(EnvironmentError, "account role admin required"):
             authority.dispatch({"operation": "save_policy", "token": auth["session"],
                                 "components": ["codex"], "role": "admin"})
-        elevated = replace(config, authorized_wallets=({"address": key.address.lower(), "role": "admin"},))
-        authority = EnvironmentAuthority(elevated)
-        self.assertEqual(authority.dispatch({"operation": "session", "token": auth["session"]})["role"], "viewer")
-        with self.assertRaisesRegex(EnvironmentError, "not enrolled"):
-            EnvironmentAuthority(replace(config, authorized_wallets=())).dispatch(
-                {"operation": "session", "token": auth["session"]}
-            )
+        authority.set_account("admin", "new-test-password-long-enough", "admin")
+        with self.assertRaisesRegex(EnvironmentError, "session expired"):
+            authority.dispatch({"operation": "session", "token": auth["session"]})
 
     def test_logout_and_expiry_revoke_pending_manual_approvals(self):
         key = Account.create()
@@ -385,8 +359,8 @@ class EnvironmentTests(unittest.TestCase):
                             authority.dispatch({"operation": "save_policy", "token": auth["session"],
                                                 "components": ["codex"]})
                 else:
-                    downgraded = replace(config, authorized_wallets=({"address": key.address.lower(), "role": "viewer"},))
-                    self.assertFalse(EnvironmentAuthority(downgraded).consume_run(run)[0])
+                    authority.set_account("admin", "test-password-long-enough", "viewer")
+                    self.assertFalse(authority.consume_run(run)[0])
 
     def test_manual_approval_rejects_tampering_and_replay(self):
         key = Account.create()

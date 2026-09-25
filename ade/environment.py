@@ -332,7 +332,6 @@ class EnvironmentConfig:
     schedule: Mapping[str, Any]
     snapshot: Mapping[str, Any]
     manual_trigger: Path
-    registration_trigger: Path
     authorization_trigger: Path
     artifacts: Mapping[str, Any] = field(default_factory=dict)
 
@@ -383,9 +382,6 @@ class EnvironmentConfig:
         if not isinstance(snapshot, Mapping):
             raise EnvironmentError("snapshot must be an object")
         manual_trigger = Path(raw.get("manual_trigger", "/usr/local/sbin/agent-environment-trigger")).expanduser().resolve()
-        registration_trigger = Path(
-            raw.get("registration_trigger", "/usr/local/sbin/agent-environment-enroll")
-        ).expanduser().resolve()
         return cls(
             path=config_path,
             vm_id=vm_id,
@@ -399,7 +395,6 @@ class EnvironmentConfig:
             snapshot=dict(snapshot),
             artifacts=artifacts,
             manual_trigger=manual_trigger,
-            registration_trigger=registration_trigger,
             authorization_trigger=Path(raw.get("authorization_trigger", "/usr/local/sbin/agent-environment-authorize")).expanduser().resolve(),
         )
 
@@ -411,7 +406,6 @@ class EnvironmentConfig:
             "version": ENVIRONMENT_VERSION,
             "vm_id": self.vm_id,
             "public_origin": self.public_origin,
-            "registration_required": not bool(self.authorized_wallets),
             "schedule": {"time": "04:00", "timezone": "UTC+8", "persistent": True},
             "snapshot": {"enabled": bool(self.snapshot.get("enabled", False))},
         }

@@ -1,12 +1,14 @@
 ---
-status: accepted
+status: superseded
 ---
 
 # MetaMask wallet-signed environment control
 
-The per-operation signing and expiring-policy decisions below are superseded by
-[ADR-0013](0013-wallet-authorized-environment-session.md). The MetaMask identity,
-registration, HTTP opt-in, and anonymous-data boundaries remain applicable.
+The wallet login, registration, and session decisions below are superseded by
+[ADR-0014](0014-password-authenticated-environment-session.md). Individually
+signed legacy update policies remain verifiable while their wallet allowlist
+entries and policy expiry remain valid. Password login requires HTTPS even when
+the surrounding deployment permits HTTP for other routes.
 
 The environment management surface uses MetaMask Ethereum accounts and EIP-191
 `personal_sign` for first-wallet registration, session authentication, individual

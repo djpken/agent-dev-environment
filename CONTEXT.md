@@ -33,24 +33,20 @@ _Avoid_: Agent environment service、Web artifact publisher、public content pag
 _Avoid_: arbitrary process、MCP config、systemd unit
 
 **Environment management surface**：
-ADES 提供的 live dashboard 與 machine-readable API；使用者透過 Wallet-authorized session，依身份權限查看環境與執行控制操作。
+ADES 提供的 live dashboard 與 machine-readable API；使用者透過 password-authenticated environment session，依帳號角色查看環境與執行控制操作。
 _Avoid_: Web artifact、public content page
 
-**Wallet-authorized session**：
-使用者以 browser wallet 確認身份與授權範圍後，對指定 VM 建立的限時操作資格；有效期間內依身份權限執行操作，無須逐次要求 wallet 簽署。
-_Avoid_: wallet connection、on-chain approval、unbounded delegation
+**Password-authenticated environment session**：
+使用者以 ADES 帳號與密碼登入後，對指定 VM 建立的限時操作資格；密碼雜湊只由 root 管理，登入 session 依帳號角色授權並於 12 小時後失效。
+_Avoid_: wallet session、open-ended registration、plaintext password storage
 
-**Wallet-signed control request**：
-既有逐次授權模式中，由使用者的 browser wallet 簽署、授權對指定 VM 或 managed component 執行一次控制操作的請求。
-_Avoid_: private key on VM、unsigned admin command
+**Environment configuration backup**：
+使用備份密碼加密的版本化 ADES manifest、帳號雜湊與更新政策；只能還原到相同 VM，匯入後撤銷舊 session。
+_Avoid_: plaintext configuration export、cross-VM restore, stored WebDAV credentials
 
-**Ethereum wallet identity**：
-由 Ethereum public address 表示、可在指定 VM 執行受控操作的授權身份；其 private key 永遠留在 browser wallet。
-_Avoid_: wallet balance、on-chain transaction、private key on VM
-
-**Wallet registration**：
-當 VM 尚未有授權身份時，由 browser wallet 對該 VM 的一次性註冊訊息簽署，將第一個 wallet 設為 admin；VM 不保存 private key。
-_Avoid_: anonymous bootstrap、public admin
+**Legacy wallet-signed update policy**：
+密碼登入導入前建立的排程維護規則，由 VM 原有 wallet allowlist 驗證簽章；規則到期或被 root-owned policy 取代後失效，wallet 不再用於登入或建立 session。
+_Avoid_: wallet login、wallet-authorized session、new wallet registration
 
 **Update policy**：
 由具管理權限的使用者設定的排程維護規則，限定可更新的 managed component 與更新範圍；啟用後持續生效，直到明確停用或修改，不受登入狀態或到期日限制。

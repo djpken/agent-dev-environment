@@ -57,6 +57,13 @@ main { max-width: 1500px; margin: 0 auto; padding: 24px clamp(20px, 4vw, 58px) c
 .auth-tag { margin: 0 0 12px; color: var(--colorBrandForeground1); font-size: 10px; font-weight: 600; letter-spacing: .06em; }
 .auth-card h2 { margin-bottom: 9px; font-size: 24px; }
 .auth-card > p:not(.auth-tag) { margin-bottom: 18px; font-size: 13px; line-height: 1.65; }
+.auth-form { display: grid; gap: 14px; }
+.auth-form > button { justify-self: start; }
+.setup-choice, .auth-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.webdav-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 12px; margin-top: 14px; }
+.webdav-form > button { justify-self: start; }
+.backup-note, .backup-message { margin: 0; color: var(--colorNeutralForeground2); font-size: 12px; line-height: 1.6; }
+.backup-message { margin-top: 13px; color: var(--colorBrandForeground1); }
 .auth-message { min-height: 19px; margin: 11px 0 7px !important; color: var(--colorPaletteMarigoldForeground1); font-size: 12px !important; }
 .auth-card > small { display: block; padding-top: 13px; border-top: 1px solid var(--line); font-size: 11px; }
 
@@ -121,6 +128,7 @@ main { max-width: 1500px; margin: 0 auto; padding: 24px clamp(20px, 4vw, 58px) c
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 205px minmax(0, 1fr); }
   .artifact-form { grid-template-columns: 1fr 1fr; }
+  .webdav-form { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 720px) {
   .app-shell { display: block; }
@@ -144,6 +152,7 @@ main { max-width: 1500px; margin: 0 auto; padding: 24px clamp(20px, 4vw, 58px) c
   .field-row .fui-Button { grid-column: 1 / -1; justify-self: start; }
   .rank-item { grid-template-columns: 28px minmax(0, 1fr); gap: 8px; }
   .artifact-form { grid-template-columns: 1fr; }
+  .webdav-form { grid-template-columns: 1fr; }
 }
 @media (max-width: 430px) {
   .topbar { flex-direction: column; }

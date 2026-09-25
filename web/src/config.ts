@@ -3,7 +3,6 @@ import { isAbsolute, resolve } from 'node:path';
 import { normalizeArtifactConfiguration, type ArtifactConfiguration } from './artifacts.js';
 import type { StatusComponentConfig } from './status.js';
 
-export type WalletRole = 'viewer' | 'operator' | 'admin';
 export const ENVIRONMENT_CONFIG = Symbol('ENVIRONMENT_CONFIG');
 
 export interface ComponentConfig extends StatusComponentConfig {
@@ -27,11 +26,9 @@ export interface EnvironmentConfig {
   tls?: { cert?: string; key?: string };
   allowed_origins?: string[];
   authorization_trigger?: string;
-  registration_trigger?: string;
   manual_trigger?: string;
   components: ComponentConfig[];
   artifacts?: ArtifactConfiguration;
-  wallets?: { authorized?: Array<{ address: string; role: WalletRole }> };
   snapshot?: { enabled?: boolean };
 }
 

@@ -1,8 +1,12 @@
 ---
-status: accepted
+status: superseded
 ---
 
 # Wallet-authorized environment sessions
+
+Superseded by [ADR-0014](0014-password-authenticated-environment-session.md),
+which replaces wallet login and wallet-owned identities with root-provisioned
+username/password accounts.
 
 Every operation permitted by the wallet's role, including component updates,
 restarts, and update-policy changes, uses one twelve-hour bearer session without

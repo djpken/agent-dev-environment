@@ -15,24 +15,10 @@ import {
   type BadgeProps,
   type BrandVariants,
 } from '@fluentui/react-components';
-import type { MetamaskConnectEVM } from '@metamask/connect-evm';
 import './styles.css';
 
 type Role = 'viewer' | 'operator' | 'admin';
-type WalletProvider = {
-  isMetaMask?: boolean;
-  isRabby?: boolean;
-  providers?: WalletProvider[];
-  request(args: { method: string; params?: unknown[] }): Promise<unknown>;
-  on?(event: string, listener: (...args: unknown[]) => void): void;
-  removeListener?(event: string, listener: (...args: unknown[]) => void): void;
-};
-
-declare global {
-  interface Window { ethereum?: WalletProvider; }
-}
-
-interface WalletSession { session: string; address: string; role: Role; expires_at: string; }
+interface AuthSession { session: string; username: string; role: Role; expires_at: string; }
 interface ComponentStatus {
   id: string; label: string; kind: string; status: string;
   version?: string | null; detail?: string;
@@ -43,11 +29,31 @@ interface Schedule {
   schedule: { time: string; timezone: string; persistent: boolean };
   policy_valid: boolean; policy_reason: string;
 }
+interface AgentSkillStatus {
+  id: string; status: string; installed: boolean; file_count: number; changed_files: number;
+}
+interface AgentMCPStatus {
+  id: string; label: string; transport: string; enabled: boolean; installed: boolean;
+  installed_version?: string; latest_version?: string; update_status: string;
+  connection_status: string;
+}
+interface AgentAssetReport {
+  checked_at: string; repository: string; source_ref: string; installation: string;
+  skills: AgentSkillStatus[]; mcp_servers: AgentMCPStatus[];
+  summary: {
+    skills: number; skill_updates_available: number; skills_available: number;
+    mcp_servers: number; mcp_updates_available: number; mcp_enabled: number; mcp_unhealthy: number;
+  };
+}
 interface RunRecord {
   id: string; trigger: string; action: string; status: string; created_at: string;
   finished_at?: string; error?: string;
   component_ids?: string[];
   components?: Array<{ id: string; status: string; detail?: string }>;
+}
+interface LocalDeployment {
+  sha: string; subject?: string; status: string; stage?: string;
+  queued_at: string; started_at?: string; finished_at?: string; error?: string;
 }
 interface ArtifactPage { entrypoint: string; access_url: string; }
 interface Artifact { name: string; file_count: number; size_bytes: number; pages: ArtifactPage[]; }
@@ -66,28 +72,9 @@ class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
-const SESSION_KEY = 'ade.environment.session.v1';
+const SESSION_KEY = 'ade.environment.session.v2';
 const MAX_UPLOAD_FILES = 200;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-const METAMASK_CONNECT_RPC_URL = 'https://ethereum-rpc.publicnode.com';
-let metaMaskConnectClientPromise: Promise<MetamaskConnectEVM> | undefined;
-
-function getMetaMaskConnectClient(): Promise<MetamaskConnectEVM> {
-  if (!metaMaskConnectClientPromise) {
-    metaMaskConnectClientPromise = import('@metamask/connect-evm')
-      .then(({ createEVMClient }) => createEVMClient({
-        dapp: { name: 'ADES', url: window.location.origin },
-        api: { supportedNetworks: { '0x1': METAMASK_CONNECT_RPC_URL } },
-        analytics: { enabled: false },
-        skipAutoAnnounce: true,
-      }))
-      .catch((error: unknown) => {
-        metaMaskConnectClientPromise = undefined;
-        throw error;
-      });
-  }
-  return metaMaskConnectClientPromise;
-}
 
 const adeBrand: BrandVariants = {
   10: '#071e11', 20: '#0a301a', 30: '#104624', 40: '#175b30',
@@ -106,20 +93,6 @@ async function readResponse<T>(response: Response): Promise<T> {
   return body as T;
 }
 
-function getWalletProvider(): WalletProvider | undefined {
-  const ethereum = window.ethereum;
-  if (!ethereum) return undefined;
-  return ethereum.providers?.find((provider) => provider.isMetaMask && !provider.isRabby) ??
-    (ethereum.isMetaMask && !ethereum.isRabby ? ethereum : undefined);
-}
-
-function encodeMessage(message: string): string {
-  const bytes = new TextEncoder().encode(message);
-  let encoded = '';
-  for (const byte of bytes) encoded += byte.toString(16).padStart(2, '0');
-  return `0x${encoded}`;
-}
-
 function formatDate(value?: string): string {
   if (!value) return '尚無時間資料';
   const date = new Date(value);
@@ -135,15 +108,18 @@ function actionLabel(action: string): string {
 function statusLabel(status: string): string {
   const labels: Record<string, string> = {
     healthy: '正常', degraded: '降級', unhealthy: '異常', unknown: '未知',
-    queued: '排隊中', running: '執行中', completed: '完成', updating: '更新中',
+    queued: '排隊中', running: '執行中', completed: '完成', succeeded: '部署成功', updating: '更新中',
     partial_failure: '部分失敗', failed: '失敗', blocked: '已阻擋', skipped: '略過',
+    current: '已同步', update_available: '有更新', available: '尚未安裝',
+    removed_upstream: '上游已移除', disabled: '未啟用', ahead: '版本較新',
+    source_missing: '來源已移除', untracked: '未追蹤來源', not_checked: '未檢查', not_installed: '未安裝',
   };
   return labels[status] || status;
 }
 
 function statusColor(status: string): NonNullable<BadgeProps['color']> {
-  if (['healthy', 'completed'].includes(status)) return 'success';
-  if (['degraded', 'unknown', 'queued', 'running'].includes(status)) return 'warning';
+  if (['healthy', 'completed', 'succeeded', 'current'].includes(status)) return 'success';
+  if (['degraded', 'unknown', 'queued', 'running', 'update_available', 'available', 'removed_upstream', 'disabled', 'ahead', 'source_missing', 'untracked', 'not_checked', 'not_installed'].includes(status)) return 'warning';
   if (['unhealthy', 'failed', 'blocked', 'partial_failure'].includes(status)) return 'danger';
   if (status === 'updating') return 'informative';
   return 'subtle';
@@ -151,6 +127,16 @@ function statusColor(status: string): NonNullable<BadgeProps['color']> {
 
 function StatusBadge({ status }: { status: string }) {
   return <Badge appearance="tint" color={statusColor(status)} shape="square" size="small">{statusLabel(status)}</Badge>;
+}
+
+function deploymentStageLabel(stage?: string): string {
+  const labels: Record<string, string> = {
+    queued: '等待執行', checking: '檢查 commit', archiving: '準備來源',
+    frontend_dependencies: '安裝前端相依套件', frontend_build: '建置前端',
+    go_build: '編譯 Go runtime', switching: '切換服務', health_check: '檢查服務',
+    complete: '完成', rollback: '回復舊版本', superseded: '已有更新的 commit',
+  };
+  return stage ? labels[stage] || stage : '尚未開始';
 }
 
 function triggerLabel(trigger: string): string {
@@ -164,16 +150,29 @@ function safeExternalUrl(value: string): boolean {
 }
 
 function App() {
-  const [session, setSession] = useState<WalletSession | null>(null);
-  const sessionRef = useRef<WalletSession | null>(null);
+  const [session, setSession] = useState<AuthSession | null>(null);
+  const sessionRef = useRef<AuthSession | null>(null);
   sessionRef.current = session;
-  const [registrationRequired, setRegistrationRequired] = useState<boolean | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [setupRegistered, setSetupRegistered] = useState<boolean | null>(null);
+  const [authMode, setAuthMode] = useState<'choose' | 'login' | 'register' | 'import'>('choose');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [authMessage, setAuthMessage] = useState('');
+  const [webdavUrl, setWebdavUrl] = useState('');
+  const [webdavUsername, setWebdavUsername] = useState('');
+  const [webdavPassword, setWebdavPassword] = useState('');
+  const [backupPassphrase, setBackupPassphrase] = useState('');
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupMessage, setBackupMessage] = useState('');
   const [globalError, setGlobalError] = useState('');
   const [health, setHealth] = useState<Health | null>(null);
+  const [agentAssets, setAgentAssets] = useState<AgentAssetReport | null>(null);
+  const [agentAssetsLoading, setAgentAssetsLoading] = useState(false);
+  const [agentAssetsError, setAgentAssetsError] = useState('');
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [runs, setRuns] = useState<RunRecord[]>([]);
+  const [deployments, setDeployments] = useState<LocalDeployment[]>([]);
   const [controlSubmitting, setControlSubmitting] = useState(false);
   const [controlMessage, setControlMessage] = useState('');
   const [artifacts, setArtifacts] = useState<ArtifactList>({ enabled: false, artifacts: [] });
@@ -191,10 +190,6 @@ function App() {
   const [showPrivate, setShowPrivate] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
-  const providerRef = useRef<WalletProvider | undefined>(undefined);
-  const metaMaskConnectClientRef = useRef<MetamaskConnectEVM | null>(null);
-  const accountRef = useRef<string | null>(null);
-  const operationRef = useRef(0);
   const trendRequestRef = useRef(0);
   const controlRunIdRef = useRef<string | null>(null);
 
@@ -208,14 +203,16 @@ function App() {
   }, []);
 
   const clearSession = useCallback((message = '') => {
-    operationRef.current += 1;
     sessionRef.current = null;
-    accountRef.current = null;
     setSession(null);
     setConnecting(false);
     setHealth(null);
+    setAgentAssets(null);
+    setAgentAssetsLoading(false);
+    setAgentAssetsError('');
     setSchedule(null);
     setRuns([]);
+    setDeployments([]);
     setControlMessage('');
     controlRunIdRef.current = null;
     setArtifacts({ enabled: false, artifacts: [] });
@@ -230,7 +227,7 @@ function App() {
     if (folderInput.current) folderInput.current.value = '';
   }, []);
 
-  const acceptSession = useCallback((next: WalletSession) => {
+  const acceptSession = useCallback((next: AuthSession) => {
     sessionRef.current = next;
     setSession(next);
     setShowPrivate(true);
@@ -243,10 +240,11 @@ function App() {
     setRefreshing(true);
     setGlobalError('');
     try {
-      const [healthResult, scheduleResult, runsResult, artifactResult] = await Promise.all([
+      const [healthResult, scheduleResult, runsResult, deploymentResult, artifactResult] = await Promise.all([
         api<Health>('/api/v1/health', {}, token),
         api<Schedule>('/api/v1/schedule', {}, token),
         api<{ runs: RunRecord[] }>('/api/v1/runs', {}, token),
+        api<{ deployments: LocalDeployment[] }>('/api/v1/deployments', {}, token),
         api<ArtifactList>('/api/v1/artifacts', {}, token).catch((error: unknown) => {
           if (error instanceof ApiError && error.status === 401) throw error;
           return { enabled: true, artifacts: [], error: error instanceof Error ? error.message : '作品清單無法載入' };
@@ -256,15 +254,34 @@ function App() {
       setHealth(healthResult);
       setSchedule(scheduleResult);
       setRuns(runsResult.runs ?? []);
+      setDeployments(deploymentResult.deployments ?? []);
       setArtifacts(artifactResult);
       setShowPrivate(true);
     } catch (error) {
-      if (error instanceof ApiError && error.status === 401) clearSession('登入已失效，請重新連接 wallet。');
+      if (error instanceof ApiError && error.status === 401) clearSession('登入已失效，請重新登入。');
       else setGlobalError(error instanceof Error ? error.message : String(error));
     } finally {
       setRefreshing(false);
     }
   }, [api, clearSession]);
+
+  async function checkAgentAssets() {
+    const current = sessionRef.current;
+    if (!current) return;
+    setAgentAssetsLoading(true);
+    setAgentAssetsError('');
+    try {
+      const result = await api<AgentAssetReport>('/api/v1/agent-assets/check', {
+        method: 'POST', body: '{}',
+      }, current.session);
+      if (sessionRef.current?.session === current.session) setAgentAssets(result);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) clearSession('登入已失效，請重新登入。');
+      else setAgentAssetsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAgentAssetsLoading(false);
+    }
+  }
 
   const loadTrending = useCallback(async (source = trendSource, since = trendSince) => {
     const requestId = ++trendRequestRef.current;
@@ -289,79 +306,28 @@ function App() {
     if (!response.ok && response.status !== 401) throw new Error('登出失敗，請再試一次。');
   }, []);
 
-  async function handleAccountsChanged(value: unknown) {
-    const accounts = Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-    const current = sessionRef.current;
-    const activeAddress = current?.address ?? accountRef.current;
-    const sdkClient = metaMaskConnectClientRef.current;
-    const selectedAccount = providerRef.current === sdkClient?.getProvider()
-      ? sdkClient?.getAccount()
-      : undefined;
-    const nextAddress = selectedAccount?.toLowerCase() ?? accounts[0]?.toLowerCase() ?? null;
-    if (!activeAddress || activeAddress === nextAddress) return;
-    accountRef.current = nextAddress;
-    clearSession('MetaMask 帳號已變更，請重新連接。');
-    if (current) void revoke(current.session).catch(() => undefined);
+  async function refreshSetupStatus() {
+    setAuthMessage('正在確認 ADES 帳號狀態…');
+    try {
+      const status = await api<{ registered: boolean }>('/api/v1/auth/setup-status');
+      setSetupRegistered(status.registered);
+      setAuthMode(status.registered ? 'login' : 'choose');
+      setAuthMessage('');
+    } catch (error) {
+      setSetupRegistered(null);
+      setAuthMessage(error instanceof Error ? error.message : '無法確認 ADES 帳號狀態。');
+    }
   }
-
-  function handleWalletDisconnect() {
-    const current = sessionRef.current;
-    clearSession('MetaMask 已中斷連線。');
-    if (current) void revoke(current.session).catch(() => undefined);
-  }
-
-  const attachProvider = useCallback((provider: WalletProvider) => {
-    if (providerRef.current === provider) return;
-    providerRef.current?.removeListener?.('accountsChanged', handleAccountsChanged);
-    providerRef.current?.removeListener?.('disconnect', handleWalletDisconnect);
-    providerRef.current = provider;
-    provider.on?.('accountsChanged', handleAccountsChanged);
-    provider.on?.('disconnect', handleWalletDisconnect);
-  // Handlers use refs, so the provider listener can remain attached for this page lifetime.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     folderInput.current?.setAttribute('webkitdirectory', '');
     void loadTrending('github', 'daily');
-
-    const announce = (event: Event) => {
-      const detail = (event as CustomEvent<{ info?: { rdns?: string }; provider?: WalletProvider }>).detail;
-      if (detail?.info?.rdns === 'io.metamask' && detail.provider) attachProvider(detail.provider);
-    };
-    window.addEventListener('eip6963:announceProvider', announce);
-    window.dispatchEvent(new Event('eip6963:requestProvider'));
-    const detected = getWalletProvider();
-    if (detected) attachProvider(detected);
-    else {
-      void getMetaMaskConnectClient()
-        .then((client) => { metaMaskConnectClientRef.current = client; })
-        .catch(() => undefined);
-    }
-
-    let saved: WalletSession | undefined;
-    try { saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null') as WalletSession | undefined; } catch { /* Ignore malformed local state. */ }
+    void refreshSetupStatus();
+    let saved: AuthSession | undefined;
+    try { saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null') as AuthSession | undefined; } catch { /* Ignore malformed local state. */ }
     if (saved?.session && Date.parse(saved.expires_at) > Date.now()) {
-      const op = operationRef.current;
-      void api<Omit<WalletSession, 'session'>>('/api/v1/auth/session', {}, saved.session)
+      void api<Omit<AuthSession, 'session'>>('/api/v1/auth/session', {}, saved.session)
         .then(async (restored) => {
-          if (operationRef.current !== op) return;
-          const provider = providerRef.current ?? getWalletProvider();
-          if (provider) {
-            attachProvider(provider);
-            const accounts = await provider.request({ method: 'eth_accounts' }) as string[];
-            const sdkClient = metaMaskConnectClientRef.current;
-            const selectedAccount = provider === sdkClient?.getProvider()
-              ? sdkClient?.getAccount()
-              : undefined;
-            const currentAddress = selectedAccount?.toLowerCase() ?? accounts[0]?.toLowerCase();
-            if (currentAddress !== restored.address) {
-              clearSession('MetaMask 帳號與目前 session 不一致，請重新登入。');
-              void revoke(saved!.session).catch(() => undefined);
-              return;
-            }
-            accountRef.current = restored.address;
-          }
           const restoredSession = { ...restored, session: saved!.session };
           acceptSession(restoredSession);
           await loadDashboard(restoredSession.session);
@@ -371,12 +337,7 @@ function App() {
           else setGlobalError(error instanceof Error ? error.message : String(error));
         });
     }
-    return () => {
-      window.removeEventListener('eip6963:announceProvider', announce);
-      providerRef.current?.removeListener?.('accountsChanged', handleAccountsChanged);
-      providerRef.current?.removeListener?.('disconnect', handleWalletDisconnect);
-    };
-  // Mount once; session and wallet listeners read current values through refs.
+  // Mount once; session state is validated by the server on reload.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -384,18 +345,20 @@ function App() {
     if (!session) return;
     const remaining = Date.parse(session.expires_at) - Date.now();
     if (remaining <= 0) {
-      clearSession('登入已逾期，請重新連接 wallet。');
+      clearSession('登入已逾期，請重新登入。');
       return;
     }
-    const timer = window.setTimeout(() => clearSession('登入已逾期，請重新連接 wallet。'), remaining);
+    const timer = window.setTimeout(() => clearSession('登入已逾期，請重新登入。'), remaining);
     return () => window.clearTimeout(timer);
   }, [session, clearSession]);
 
   useEffect(() => {
-    if (!session || refreshing || !runs.some((run) => run.status === 'queued' || run.status === 'running')) return;
+    const activeRun = runs.some((run) => run.status === 'queued' || run.status === 'running');
+    const activeDeployment = deployments.some((deployment) => deployment.status === 'queued' || deployment.status === 'running');
+    if (!session || refreshing || (!activeRun && !activeDeployment)) return;
     const timer = window.setTimeout(() => void loadDashboard(session.session), 4000);
     return () => window.clearTimeout(timer);
-  }, [session, runs, refreshing, loadDashboard]);
+  }, [session, runs, deployments, refreshing, loadDashboard]);
 
   useEffect(() => {
     const runId = controlRunIdRef.current;
@@ -415,6 +378,7 @@ function App() {
   const updatable = health?.components.filter((component) => component.update_supported) ?? [];
   const restartable = health?.components.filter((component) => component.restart_supported) ?? [];
   const hasActiveRun = runs.some((run) => run.status === 'queued' || run.status === 'running');
+  const hasActiveDeployment = deployments.some((deployment) => deployment.status === 'queued' || deployment.status === 'running');
   const controlsBusy = controlSubmitting || hasActiveRun;
 
   useEffect(() => {
@@ -422,92 +386,133 @@ function App() {
     else if (!htmlEntrypoints.includes(entrypoint)) setEntrypoint(htmlEntrypoints[0]);
   }, [htmlEntrypoints, entrypoint]);
 
-  async function signWithWallet(provider: WalletProvider, address: string, message: string): Promise<string> {
-    const accounts = await provider.request({ method: 'eth_accounts' }) as string[];
-    const sdkClient = metaMaskConnectClientRef.current;
-    const selectedAccount = provider === sdkClient?.getProvider()
-      ? sdkClient?.getAccount()
-      : undefined;
-    const currentAddress = selectedAccount?.toLowerCase() ?? accounts[0]?.toLowerCase();
-    if (currentAddress !== address) throw new Error('MetaMask 帳號已變更，請重新連接。');
-    const signature = await provider.request({ method: 'personal_sign', params: [encodeMessage(message), address] });
-    if (typeof signature !== 'string') throw new Error('MetaMask 未回傳簽章。');
-    return signature;
-  }
-
-  async function login(address: string, provider: WalletProvider, operation: number) {
-    const challenge = await api<{ challenge_id: string; message: string }>(
-      `/api/v1/auth/challenge?address=${encodeURIComponent(address)}&origin=${encodeURIComponent(location.origin)}`,
-    );
-    const signature = await signWithWallet(provider, address, challenge.message);
-    const verified = await api<WalletSession>('/api/v1/auth/verify', {
-      method: 'POST',
-      body: JSON.stringify({ challenge_id: challenge.challenge_id, address, message: challenge.message, signature }),
-    });
-    if (operationRef.current !== operation || accountRef.current !== address) {
-      await revoke(verified.session);
-      throw new Error('帳號已變更，請重新連接。');
-    }
-    acceptSession(verified);
-    await loadDashboard(verified.session);
-  }
-
-  async function connectWallet() {
+  async function login(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     if (connecting || session) return;
-    const operation = ++operationRef.current;
+    if (window.location.protocol !== 'https:') {
+      setAuthMessage('密碼登入需要 HTTPS，請使用安全連線網址。');
+      return;
+    }
     setConnecting(true);
-    setAuthMessage('正在連接 MetaMask。核准後會回到 ADES。');
+    setAuthMessage('正在登入 ADES…');
     setGlobalError('');
     try {
-      let provider: WalletProvider;
-      let address: string | undefined;
-      const injectedProvider = getWalletProvider() ?? providerRef.current;
-      if (injectedProvider) {
-        provider = injectedProvider;
-        attachProvider(provider);
-        const accounts = await provider.request({ method: 'eth_requestAccounts' }) as string[];
-        address = accounts[0];
-      } else {
-        const client = metaMaskConnectClientRef.current ?? await getMetaMaskConnectClient();
-        metaMaskConnectClientRef.current = client;
-        setAuthMessage('正在開啟 MetaMask。核准連線後會回到 ADES。');
-        const connection = await client.connect({ chainIds: ['0x1'] });
-        provider = client.getProvider();
-        attachProvider(provider);
-        address = client.getAccount() ?? connection.accounts[0];
-      }
-      if (operationRef.current !== operation) return;
-      const normalizedAddress = address?.toLowerCase();
-      if (!normalizedAddress) throw new Error('MetaMask 沒有回傳帳號。');
-      accountRef.current = normalizedAddress;
-      let registration: { challenge_id: string; message: string } | undefined;
-      try {
-        registration = await api<{ challenge_id: string; message: string }>(
-          '/api/v1/registration/challenge?address=' + encodeURIComponent(normalizedAddress),
-        );
-      } catch (error) {
-        if (!(error instanceof ApiError) || error.status !== 409) throw error;
-        setRegistrationRequired(false);
-      }
-      if (registration) {
-        setRegistrationRequired(true);
-        setAuthMessage('請在 MetaMask 確認簽署，完成後會回到 ADES。');
-        const signature = await signWithWallet(provider, normalizedAddress, registration.message);
-        if (operationRef.current !== operation) return;
-        await api('/api/v1/registration', {
-          method: 'POST',
-          body: JSON.stringify({ challenge_id: registration.challenge_id, address: normalizedAddress, message: registration.message, signature }),
-        });
-        setRegistrationRequired(false);
-      }
-      if (operationRef.current === operation) {
-        setAuthMessage('請在 MetaMask 確認簽署，完成後會回到 ADES。');
-        await login(normalizedAddress, provider, operation);
-      }
+      const verified = await api<AuthSession>('/api/v1/auth/login', {
+      method: 'POST',
+        body: JSON.stringify({ username, password }),
+      });
+      acceptSession(verified);
+      setPassword('');
+      await loadDashboard(verified.session);
     } catch (error) {
-      if (operationRef.current === operation) setAuthMessage(error instanceof Error ? error.message : String(error));
+      setAuthMessage(error instanceof ApiError && error.status === 401
+        ? '使用者名稱或密碼錯誤。'
+        : error instanceof Error ? error.message : String(error));
     } finally {
-      if (operationRef.current === operation) setConnecting(false);
+      setConnecting(false);
+    }
+  }
+
+  async function register(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (connecting || session) return;
+    if (window.location.protocol !== 'https:') {
+      setAuthMessage('註冊需要 HTTPS，請使用安全連線網址。');
+      return;
+    }
+    setConnecting(true);
+    setAuthMessage('正在建立第一個管理員帳號…');
+    try {
+      const created = await api<AuthSession>('/api/v1/auth/register', {
+        method: 'POST', body: JSON.stringify({ username, password }),
+      });
+      setSetupRegistered(true);
+      acceptSession(created);
+      setPassword('');
+      await loadDashboard(created.session);
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : String(error));
+      if (error instanceof ApiError && error.status === 409) {
+        setSetupRegistered(true);
+        setAuthMode('login');
+      }
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  async function importFromWebDAV(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (connecting || session) return;
+    if (window.location.protocol !== 'https:') {
+      setAuthMessage('WebDAV 匯入需要 HTTPS，請使用安全連線網址。');
+      return;
+    }
+    setConnecting(true);
+    setAuthMessage('正在下載並驗證加密備份…');
+    try {
+      const result = await api<{ imported: boolean; restart_required?: boolean; restart_scheduled?: boolean }>(
+        '/api/v1/auth/webdav-import',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            webdav_url: webdavUrl,
+            webdav_username: webdavUsername,
+            webdav_password: webdavPassword,
+            backup_passphrase: backupPassphrase,
+          }),
+        },
+      );
+      setSetupRegistered(true);
+      setAuthMode('login');
+      setUsername('');
+      setPassword('');
+      setWebdavPassword('');
+      setBackupPassphrase('');
+      const message = result.restart_required
+        ? result.restart_scheduled
+          ? '環境設定已匯入，ADES 正在重新啟動。請稍後用備份中的帳號登入。'
+          : '環境設定已匯入，但無法自動重新啟動 ADES。請先重新啟動服務，再用備份中的帳號登入。'
+        : '匯入完成，請用備份中的帳號與密碼登入。';
+      setAuthMessage(message);
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : String(error));
+      if (error instanceof ApiError && error.status === 409) {
+        setSetupRegistered(true);
+        setAuthMode('login');
+      }
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  async function backupToWebDAV(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session || session.role !== 'admin' || backupBusy) return;
+    if (window.location.protocol !== 'https:') {
+      setBackupMessage('備份需要 HTTPS，請使用安全連線網址。');
+      return;
+    }
+    if (!window.confirm('加密備份會覆蓋 WebDAV URL 上的同名檔案，內容包含 ADES 設定、帳號雜湊與更新政策。確定繼續？')) return;
+    setBackupBusy(true);
+    setBackupMessage('正在加密並上傳環境設定…');
+    try {
+      const result = await api<{ backed_up: boolean; size_bytes: number }>('/api/v1/environment/backup', {
+        method: 'POST',
+        body: JSON.stringify({
+          webdav_url: webdavUrl,
+          webdav_username: webdavUsername,
+          webdav_password: webdavPassword,
+          backup_passphrase: backupPassphrase,
+        }),
+      });
+      setBackupMessage(`備份完成，已上傳 ${(result.size_bytes / 1024).toFixed(1)} KiB 加密檔案。`);
+      setWebdavPassword('');
+      setBackupPassphrase('');
+    } catch (error) {
+      setBackupMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBackupBusy(false);
     }
   }
 
@@ -638,8 +643,10 @@ function App() {
           <a href="#trending"><span>01</span>專案排行</a>
           {session && <>
             <p className="sidebar-label">管理</p><a href="#environment"><span>02</span>環境總覽</a>
-            {artifacts.enabled && <a href="#artifact-panel"><span>03</span>網頁發布</a>}
-            <a href="#schedule-panel"><span>04</span>更新排程</a><a href="#runs-panel"><span>05</span>執行紀錄</a>
+            <a href="#deployments-panel"><span>03</span>本機部署</a>
+            {artifacts.enabled && <a href="#artifact-panel"><span>04</span>網頁發布</a>}
+            <a href="#schedule-panel"><span>05</span>更新排程</a><a href="#runs-panel"><span>06</span>執行紀錄</a>
+            {session.role === 'admin' && <a href="#backup-panel"><span>07</span>設定備份</a>}
           </>}
         </nav>
         <div className="sidebar-footer"><i />{session ? '已連線至此環境' : '公開閱讀模式'}</div>
@@ -651,7 +658,7 @@ function App() {
             <h1>{session ? '環境管理' : 'GitHub 專案排行'}</h1></div>
           <div className="topbar-actions">
             {session ? <>
-              <span className="identity">{session.role} · {session.address}</span>
+              <span className="identity">{session.role} · {session.username}</span>
               <Button appearance="subtle" type="button" onClick={() => void refresh()} disabled={refreshing}>{refreshing ? '更新中…' : '重新整理'}</Button>
               <Button appearance="subtle" type="button" onClick={() => void logout()}>登出</Button>
             </> : <span className="identity">尚未登入</span>}
@@ -662,16 +669,69 @@ function App() {
           {!session && <section className="auth-stage" aria-labelledby="auth-title">
             <article className="auth-card">
               <span className="auth-mark" aria-hidden="true">AE</span>
-              <p className="auth-tag">{connecting ? 'WALLET AUTHORIZATION' : registrationRequired === null ? 'WALLET ACCESS' : registrationRequired ? 'FIRST REGISTRATION' : 'WALLET LOGIN'}</p>
-              <h2 id="auth-title">{registrationRequired === null ? '連接 wallet' : registrationRequired ? '註冊這台環境' : '登入 ADES'}</h2>
-              <p>{registrationRequired === null
-                ? '連接 MetaMask 後，ADES 會確認這台環境是否需要首次註冊。'
-                : registrationRequired
-                  ? '尚未完成註冊。第一個註冊的 wallet 會成為這台環境的管理者。'
-                  : '使用已授權的 MetaMask wallet 登入，查看環境狀態與管理功能。'}</p>
-              <Button appearance="primary" type="button" onClick={() => void connectWallet()} disabled={connecting}>{connecting ? '請在 MetaMask 確認…' : registrationRequired === null ? '連接 MetaMask' : registrationRequired ? '使用 MetaMask 註冊' : '使用 MetaMask 登入'}</Button>
+              <p className="auth-tag">{setupRegistered ? 'ACCOUNT LOGIN' : 'FIRST-TIME SETUP'}</p>
+              <h2 id="auth-title">{setupRegistered ? '登入 ADES' : authMode === 'register' ? '註冊管理員帳號' : authMode === 'import' ? '從 WebDAV 匯入' : '設定 ADES 帳號'}</h2>
+              <p>{setupRegistered
+                ? '使用這台環境的帳號與密碼登入，查看狀態並管理受控作業。'
+                : '目前沒有 ADES 使用者，請註冊第一個管理員帳號，或從 WebDAV 還原加密備份。'}</p>
+              {setupRegistered === null && <div className="auth-form">
+                <Button appearance="secondary" type="button" onClick={() => void refreshSetupStatus()}>重新檢查</Button>
+              </div>}
+              {setupRegistered === false && authMode === 'choose' && <div className="setup-choice">
+                <Button appearance="primary" type="button" onClick={() => { setAuthMode('register'); setAuthMessage(''); }}>註冊</Button>
+                <Button appearance="secondary" type="button" onClick={() => { setAuthMode('import'); setAuthMessage(''); }}>WebDAV 匯入</Button>
+              </div>}
+              {setupRegistered === false && authMode === 'register' && <form className="auth-form" onSubmit={(event) => void register(event)}>
+                <Field label="使用者名稱" required>
+                  <Input name="username" type="text" autoComplete="username" autoCapitalize="none" spellCheck={false}
+                    value={username} onChange={(_event, data) => setUsername(data.value)} required />
+                </Field>
+                <Field label="密碼，至少 12 個字元" required>
+                  <Input name="password" type="password" autoComplete="new-password" minLength={12}
+                    value={password} onChange={(_event, data) => setPassword(data.value)} required />
+                </Field>
+                <div className="auth-actions">
+                  <Button appearance="primary" type="submit" disabled={connecting || !username || password.length < 12}>{connecting ? '建立中…' : '建立管理員帳號'}</Button>
+                  <Button appearance="subtle" type="button" disabled={connecting} onClick={() => { setAuthMode('choose'); setAuthMessage(''); }}>返回</Button>
+                </div>
+              </form>}
+              {setupRegistered === false && authMode === 'import' && <form className="auth-form" onSubmit={(event) => void importFromWebDAV(event)}>
+                <Field label="WebDAV 備份檔案 URL" required>
+                  <Input name="webdav_url" type="url" autoComplete="url" placeholder="https://dav.example.com/ades-backup.json"
+                    value={webdavUrl} onChange={(_event, data) => setWebdavUrl(data.value)} required />
+                </Field>
+                <Field label="WebDAV 使用者名稱">
+                  <Input name="webdav_username" type="text" autoComplete="off" autoCapitalize="none"
+                    value={webdavUsername} onChange={(_event, data) => setWebdavUsername(data.value)} />
+                </Field>
+                <Field label="WebDAV 密碼">
+                  <Input name="webdav_password" type="password" autoComplete="off"
+                    value={webdavPassword} onChange={(_event, data) => setWebdavPassword(data.value)} />
+                </Field>
+                <Field label="備份加密密碼，至少 12 個字元" required>
+                  <Input name="backup_passphrase" type="password" autoComplete="off" minLength={12}
+                    value={backupPassphrase} onChange={(_event, data) => setBackupPassphrase(data.value)} required />
+                </Field>
+                <div className="auth-actions">
+                  <Button appearance="primary" type="submit" disabled={connecting || !webdavUrl || backupPassphrase.length < 12}>{connecting ? '匯入中…' : '下載並匯入'}</Button>
+                  <Button appearance="subtle" type="button" disabled={connecting} onClick={() => { setAuthMode('choose'); setAuthMessage(''); }}>返回</Button>
+                </div>
+              </form>}
+              {setupRegistered === true && <form className="auth-form" onSubmit={(event) => void login(event)}>
+                <Field label="使用者名稱" required>
+                  <Input name="username" type="text" autoComplete="username" autoCapitalize="none" spellCheck={false}
+                    value={username} onChange={(_event, data) => setUsername(data.value)} required />
+                </Field>
+                <Field label="密碼" required>
+                  <Input name="password" type="password" autoComplete="current-password"
+                    value={password} onChange={(_event, data) => setPassword(data.value)} required />
+                </Field>
+                <Button appearance="primary" type="submit" disabled={connecting || !username || !password}>
+                  {connecting ? '登入中…' : '登入'}
+                </Button>
+              </form>}
               <p className="auth-message" role="status" aria-live="polite">{authMessage}</p>
-              <small>核准連線與簽署時會切換到 MetaMask App，完成後返回 ADES。登入 session 最長有效 12 小時，登出後立即撤銷。</small>
+              <small>帳號與密碼欄位支援 1Password 自動填入。登入、註冊與 WebDAV 憑證都需要 HTTPS。登入 session 最長有效 12 小時。</small>
             </article>
           </section>}
 
@@ -746,6 +806,69 @@ function App() {
               </Card>
             </section>
 
+            <section className="panel-shell" id="deployments-panel">
+              <Card appearance="filled-alternative" className="panel">
+              <div className="panel-heading"><div><p className="eyebrow">LOCAL COMMIT DEPLOY</p><h2>本機部署</h2>
+                <p>本機 commit 會觸發一次部署；失敗時保留上一個正常版本，不自動重試。</p></div>
+                {deployments[0] && <StatusBadge status={deployments[0].status} />}
+              </div>
+              {deployments.length ? <div className="run-list">{deployments.map((deployment) => <article className="run-row" key={deployment.sha}>
+                <div className="run-title"><code>{deployment.sha.slice(0, 12)}</code><StatusBadge status={deployment.status} /></div>
+                <p>{deployment.subject || '本機 commit'} · {formatDate(deployment.queued_at)}</p>
+                <p>階段：{deploymentStageLabel(deployment.stage)}{deployment.started_at ? ` · 開始於 ${formatDate(deployment.started_at)}` : ''}</p>
+                {deployment.finished_at && <p>結束於 {formatDate(deployment.finished_at)}</p>}
+                {deployment.error && <p className="run-error">{deployment.error}</p>}
+              </article>)}</div> : <p className="empty-state">尚無本機部署紀錄。下一次 commit 後會自動出現在這裡。</p>}
+              {hasActiveDeployment && <MessageBar intent="info"><MessageBarBody role="status" aria-live="polite">部署進行中，狀態每 4 秒更新。</MessageBarBody></MessageBar>}
+              </Card>
+            </section>
+
+            <section className="panel-shell" id="agent-assets">
+              <Card appearance="filled-alternative" className="panel">
+                <div className="panel-heading">
+                  <div><p className="eyebrow">SKILLS & MCP</p><h2>Skills 與 MCP 更新狀態</h2>
+                    <p>手動比對已安裝內容與來源 repo 的 default branch。MCP 連線由 host 管理，此檢查不探測 MCP session。</p>
+                  </div>
+                  <Button appearance="secondary" type="button" onClick={() => void checkAgentAssets()} disabled={agentAssetsLoading}>
+                    {agentAssetsLoading ? '檢查中…' : '手動檢查更新'}
+                  </Button>
+                </div>
+                {agentAssetsError && <p className="error-text" role="alert">{agentAssetsError}</p>}
+                {agentAssets && <>
+                  <p className="component-detail" role="status">
+                    {agentAssets.repository} · {agentAssets.source_ref} · 檢查於 {formatDate(agentAssets.checked_at)}
+                  </p>
+                  <p className="component-detail">
+                    Skills {agentAssets.summary.skill_updates_available} 項有更新，{agentAssets.summary.skills_available} 項尚未安裝；
+                    MCP {agentAssets.summary.mcp_updates_available} 項有更新，{agentAssets.summary.mcp_enabled} 項已啟用。
+                  </p>
+                  <div className="component-grid">
+                    {agentAssets.skills.map((skill) => <article className="component-item" key={`skill:${skill.id}`}>
+                      <Card appearance="filled" className="component-card">
+                        <div className="card-heading"><StatusBadge status={skill.status} /><span className="component-kind">Skill</span></div>
+                        <h3>{skill.id}</h3>
+                        <p className="component-version">{skill.installed ? '已安裝' : '可從來源取得'} · {skill.file_count} 個檔案</p>
+                        {!!skill.changed_files && <p className="component-detail">{skill.changed_files} 個檔案與來源不同</p>}
+                      </Card>
+                    </article>)}
+                    {agentAssets.mcp_servers.map((provider) => <article className="component-item" key={`mcp:${provider.id}`}>
+                      <Card appearance="filled" className="component-card">
+                        <div className="card-heading"><StatusBadge status={provider.update_status} /><span className="component-kind">MCP · {provider.transport}</span></div>
+                        <h3>{provider.label}</h3>
+                        <p className="component-version">
+                          {provider.enabled ? `已啟用 · ${provider.installed_version || '版本未知'}` : '未啟用'}
+                          {provider.latest_version ? ` · 來源版本 ${provider.latest_version}` : ''}
+                        </p>
+                        <p className="component-detail">MCP session：{statusLabel(provider.connection_status)}</p>
+                      </Card>
+                    </article>)}
+                  </div>
+                  {!agentAssets.skills.length && !agentAssets.mcp_servers.length && <p className="empty-state">來源目前沒有可盤點的 Skills 或 MCP provider。</p>}
+                </>}
+                {!agentAssets && !agentAssetsLoading && !agentAssetsError && <p className="empty-state">按「手動檢查更新」盤點 Skills 與 MCP。檢查只讀取本機 ADE generation 與 GitHub，不會套用更新。</p>}
+              </Card>
+            </section>
+
             {artifacts.enabled && <section className="panel-shell" id="artifact-panel">
               <Card appearance="filled-alternative" className="panel">
               <div className="panel-heading"><div><p className="eyebrow">WEB ARTIFACTS</p><h2>網頁發布</h2><p>發布內容使用獨立的 artifact origin，不會在管理頁面內執行。</p></div>
@@ -792,6 +915,36 @@ function App() {
               </div>}
               </Card>
             </section>
+
+            {session.role === 'admin' && <section className="panel-shell" id="backup-panel">
+              <Card appearance="filled-alternative" className="panel">
+                <div className="panel-heading"><div><p className="eyebrow">WEBDAV BACKUP</p><h2>環境設定備份</h2>
+                  <p>匯出 ADES manifest、帳號雜湊與更新政策，使用備份密碼加密後上傳。</p></div></div>
+                <p className="backup-note">備份綁定目前 VM，只能還原到相同 VM。登入 session、TLS 私鑰與 WebDAV 連線憑證不會寫入備份。匯入會驗證設定並清除舊 session。</p>
+                <form className="webdav-form" onSubmit={(event) => void backupToWebDAV(event)}>
+                  <Field label="WebDAV 備份檔案 URL" required size="small">
+                    <Input name="webdav_url" type="url" autoComplete="url" placeholder="https://dav.example.com/ades-backup.json"
+                      value={webdavUrl} onChange={(_event, data) => setWebdavUrl(data.value)} required />
+                  </Field>
+                  <Field label="WebDAV 使用者名稱" size="small">
+                    <Input name="webdav_username" type="text" autoComplete="off" autoCapitalize="none"
+                      value={webdavUsername} onChange={(_event, data) => setWebdavUsername(data.value)} />
+                  </Field>
+                  <Field label="WebDAV 密碼" size="small">
+                    <Input name="webdav_password" type="password" autoComplete="off"
+                      value={webdavPassword} onChange={(_event, data) => setWebdavPassword(data.value)} />
+                  </Field>
+                  <Field label="備份加密密碼，至少 12 個字元" required size="small">
+                    <Input name="backup_passphrase" type="password" autoComplete="off" minLength={12}
+                      value={backupPassphrase} onChange={(_event, data) => setBackupPassphrase(data.value)} required />
+                  </Field>
+                  <Button appearance="primary" type="submit" disabled={backupBusy || !webdavUrl || backupPassphrase.length < 12}>
+                    {backupBusy ? '備份中…' : '加密並上傳'}
+                  </Button>
+                </form>
+                {backupMessage && <p className="backup-message" role="status" aria-live="polite">{backupMessage}</p>}
+              </Card>
+            </section>}
 
             <section className="panel-shell" id="runs-panel">
               <Card appearance="filled-alternative" className="panel">

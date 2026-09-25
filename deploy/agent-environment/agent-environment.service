@@ -16,7 +16,7 @@ UMask=0077
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-# Enrollment and session authorization use root helpers; Unix ownership denies service-user writes.
+# Account and session authorization use root helpers; Unix ownership denies service-user writes.
 ReadWritePaths=/etc/ade /var/lib/ade/agent-environment /var/lib/ade/web-artifacts
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 RestrictSUIDSGID=true

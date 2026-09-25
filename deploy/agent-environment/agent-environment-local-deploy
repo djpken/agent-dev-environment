@@ -1,0 +1,321 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+config_file=/etc/ade/agent-environment-local-deploy.env
+[[ -r "$config_file" ]] || { echo 'local deployment is not installed' >&2; exit 1; }
+source "$config_file"
+
+[[ $(id -u) == 0 ]] || { echo 'local deployment worker must run as root' >&2; exit 1; }
+[[ $# -eq 1 && "$1" =~ ^[0-9a-f]{40}$ ]] || { echo 'invalid commit SHA' >&2; exit 2; }
+sha=$1
+state_tool=/usr/local/sbin/agent-environment-local-deploy-state
+state_args=(--state-root "$STATE_ROOT" --sha "$sha")
+git_repo() { /usr/bin/git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT" "$@"; }
+
+exec 9>/run/lock/agent-environment-local-deploy.lock
+flock -x 9
+
+stage=checking
+failure='部署失敗，舊版本仍在運作'
+terminal_status=
+staging_dir=
+backup_dir=
+temporary_files=()
+switch_started=0
+deployment_succeeded=0
+rollback_failed=0
+deployments_dir=$DEPLOYMENTS_ROOT
+release_dir=$deployments_dir/$sha
+environment_file=/etc/ade/agent-environment.env
+manifest_file=/etc/ade/agent-environment.json
+
+backup_paths=(
+  /usr/local/bin/ade
+  /usr/local/bin/ade-environment-service
+  /usr/local/sbin/agent-environment-update
+  /usr/local/sbin/agent-environment-trigger
+  /usr/local/sbin/agent-environment-authorize
+  /usr/local/sbin/codex-headless-update
+  /usr/local/sbin/orca-headless-update
+  /etc/systemd/system/agent-environment.service
+  /etc/systemd/system/agent-environment-update.service
+  /etc/systemd/system/agent-environment-update.timer
+  /etc/sudoers.d/agent-environment
+  "$environment_file"
+  "$manifest_file"
+)
+
+configured_health_url() {
+  /usr/bin/python3 - "$manifest_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as config_file:
+    config = json.load(config_file)
+listen = config.get("listen", {})
+host = listen.get("host", "127.0.0.1")
+if host in ("0.0.0.0", "::", ""):
+    host = "127.0.0.1"
+port = int(listen.get("port", 6790))
+tls = config.get("tls", {})
+scheme = "https" if tls.get("cert") and tls.get("key") else "http"
+print(f"{scheme}://{host}:{port}/")
+PY
+}
+
+wait_for_health() {
+  local url=$1
+  local attempt
+  for attempt in $(seq 1 30); do
+    if curl --fail --silent --show-error --insecure --max-time 5 -o /dev/null "$url" 2>/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+set_stage() {
+  stage=$1
+  "$state_tool" "${state_args[@]}" --status running --stage "$stage"
+}
+
+restore_previous() {
+  [[ -n "$backup_dir" && -d "$backup_dir" ]] || return 0
+  echo 'Deployment failed; restoring the previous runtime.' >&2
+  "$state_tool" "${state_args[@]}" --status running --stage rollback >/dev/null 2>&1 || true
+  local index path
+  for index in "${!backup_paths[@]}"; do
+    path=${backup_paths[$index]}
+    rm -rf -- "$path" || { rollback_failed=1; continue; }
+    if [[ -f "$backup_dir/$index.present" ]] && [[ $(<"$backup_dir/$index.present") == yes ]]; then
+      mkdir -p -- "$(dirname "$path")" || { rollback_failed=1; continue; }
+      cp -a -- "$backup_dir/$index" "$path" || rollback_failed=1
+    fi
+  done
+  systemctl daemon-reload || rollback_failed=1
+  systemctl restart agent-environment.service || rollback_failed=1
+  local rollback_health_url
+  rollback_health_url=$(configured_health_url) || rollback_failed=1
+  if [[ -n "$rollback_health_url" ]] && ! wait_for_health "$rollback_health_url"; then
+    rollback_failed=1
+  fi
+}
+
+finish() {
+  local result=$?
+  local failed_stage=$stage
+  trap - EXIT
+  set +e
+  if ((result != 0 && switch_started && !deployment_succeeded)); then
+    restore_previous
+    if ((rollback_failed)); then
+      failure="$failure；回復舊版本也失敗，請檢查服務"
+    else
+      failure="$failure；舊版本已回復"
+    fi
+  fi
+  if ((result == 0 && deployment_succeeded)); then
+    terminal_status=${terminal_status:-succeeded}
+    local -a final_args=("${state_args[@]}" --status "$terminal_status" --stage "$failed_stage")
+    if [[ "$terminal_status" == skipped ]]; then final_args+=(--error "$failure"); fi
+    "$state_tool" "${final_args[@]}" >/dev/null 2>&1 || true
+  elif ((result != 0)); then
+    "$state_tool" "${state_args[@]}" --status failed --stage "$failed_stage" \
+      --error "$failure" >/dev/null 2>&1 || true
+  fi
+  [[ -z "$staging_dir" || ! -d "$staging_dir" ]] || rm -rf -- "$staging_dir"
+  [[ -z "$backup_dir" || ! -d "$backup_dir" ]] || rm -rf -- "$backup_dir"
+  local temporary_file
+  for temporary_file in "${temporary_files[@]}"; do
+    rm -f -- "$temporary_file"
+  done
+  exit "$result"
+}
+trap finish EXIT
+
+set_stage checking
+git_repo cat-file -e "$sha^{commit}" || { failure='commit 不存在於本機 repository'; exit 1; }
+head_sha=$(git_repo rev-parse HEAD)
+if [[ "$head_sha" != "$sha" ]]; then
+  terminal_status=skipped
+  stage=superseded
+  failure='較新的 commit 已取代此版本'
+  deployment_succeeded=1
+  exit 0
+fi
+git_repo cat-file -e "$sha:go.mod" || { failure='commit 缺少 Go runtime'; exit 1; }
+
+install -d -o orca -g orca -m 0750 "$deployments_dir" \
+  /home/orca/.cache/ade-local-deploy/npm /home/orca/.cache/go-build /home/orca/go/pkg/mod
+if [[ -L "$release_dir" ]]; then
+  failure='部署版本目錄是 symlink'
+  exit 1
+fi
+
+release_ready() {
+  [[ -x "$release_dir/bin/ade" \
+    && -f "$release_dir/web/dist/ui/index.html" \
+    && -f "$release_dir/deploy/agent-environment/agent-environment.service" \
+    && -f "$release_dir/deploy/agent-environment/ade-environment-service.wrapper" ]]
+}
+
+if ! release_ready; then
+  if [[ -e "$release_dir" ]]; then rm -rf -- "$release_dir"; fi
+  set_stage archiving
+  staging_dir=$(mktemp -d "$deployments_dir/.local-${sha:0:12}.XXXXXX")
+  git_repo archive "$sha" | tar -x -C "$staging_dir"
+  [[ -f "$staging_dir/go.mod" && -f "$staging_dir/web/package-lock.json" ]] || {
+    failure='commit 缺少 Go 或前端建置來源'
+    exit 1
+  }
+  chown -R orca:orca "$staging_dir"
+
+  npm_bin=$(command -v npm || true)
+  go_bin=$(command -v go || true)
+  [[ -n "$go_bin" && -x "$go_bin" ]] || go_bin=/usr/local/go/bin/go
+  [[ -n "$npm_bin" && -x "$npm_bin" && -x "$go_bin" ]] || {
+    failure='VM 缺少 Node.js、npm 或 Go toolchain'
+    exit 1
+  }
+
+  set_stage frontend_dependencies
+  if ! runuser -u orca -- env HOME=/home/orca PATH="$PATH" \
+    npm_config_cache=/home/orca/.cache/ade-local-deploy/npm \
+    "$npm_bin" ci --prefix "$staging_dir/web"; then
+    failure='npm ci 失敗，舊版本仍在運作'
+    exit 1
+  fi
+  set_stage frontend_build
+  if ! runuser -u orca -- env HOME=/home/orca PATH="$PATH" \
+    npm_config_cache=/home/orca/.cache/ade-local-deploy/npm \
+    "$npm_bin" run build --prefix "$staging_dir/web"; then
+    failure='前端建置失敗，舊版本仍在運作'
+    exit 1
+  fi
+  [[ -f "$staging_dir/web/dist/ui/index.html" ]] || {
+    failure='前端建置沒有產生 dashboard'
+    exit 1
+  }
+
+  set_stage go_build
+  install -d -o orca -g orca -m 0755 "$staging_dir/bin"
+  if ! runuser -u orca -- env HOME=/home/orca PATH="$PATH" \
+    GOTOOLCHAIN=local CGO_ENABLED=0 GOCACHE=/home/orca/.cache/go-build \
+    GOMODCACHE=/home/orca/go/pkg/mod \
+    /bin/bash -c 'cd "$1" && "$2" build -trimpath -ldflags="-s -w" -o "$1/bin/ade" ./cmd/ade' \
+    _ "$staging_dir" "$go_bin"; then
+    failure='Go runtime 編譯失敗，舊版本仍在運作'
+    exit 1
+  fi
+  chmod 0755 "$staging_dir/bin/ade"
+  chown orca:orca "$staging_dir/bin/ade"
+  mv -- "$staging_dir" "$release_dir"
+  staging_dir=
+fi
+
+set_stage switching
+backup_dir=$(mktemp -d "$STATE_ROOT/.local-deploy-backup.XXXXXX")
+chmod 0700 "$backup_dir"
+for index in "${!backup_paths[@]}"; do
+  path=${backup_paths[$index]}
+  if [[ -e "$path" || -L "$path" ]]; then
+    cp -a -- "$path" "$backup_dir/$index"
+    printf 'yes\n' >"$backup_dir/$index.present"
+  else
+    printf 'no\n' >"$backup_dir/$index.present"
+  fi
+done
+switch_started=1
+
+for pair in \
+  'ade-environment-service.wrapper:/usr/local/bin/ade-environment-service' \
+  'ade-environment-update.wrapper:/usr/local/sbin/agent-environment-update' \
+  'agent-environment-trigger:/usr/local/sbin/agent-environment-trigger' \
+  'agent-environment-authorize:/usr/local/sbin/agent-environment-authorize' \
+  'codex-headless-update:/usr/local/sbin/codex-headless-update' \
+  'orca-headless-update:/usr/local/sbin/orca-headless-update'; do
+  source_name=${pair%%:*}
+  target_path=${pair#*:}
+  install -o root -g root -m 0755 \
+    "$release_dir/deploy/agent-environment/$source_name" "$target_path"
+done
+install -o root -g root -m 0755 "$release_dir/bin/ade" /usr/local/bin/ade
+install -o root -g root -m 0644 \
+  "$release_dir/deploy/agent-environment/agent-environment.service" \
+  /etc/systemd/system/agent-environment.service
+install -o root -g root -m 0644 \
+  "$release_dir/deploy/agent-environment/agent-environment-update.service" \
+  /etc/systemd/system/agent-environment-update.service
+install -o root -g root -m 0644 \
+  "$release_dir/deploy/agent-environment/agent-environment-update.timer" \
+  /etc/systemd/system/agent-environment-update.timer
+sudoers_candidate=$(mktemp /etc/sudoers.d/.agent-environment.XXXXXX)
+temporary_files+=("$sudoers_candidate")
+install -o root -g root -m 0600 \
+  "$release_dir/deploy/agent-environment/agent-environment.sudoers" "$sudoers_candidate"
+visudo -cf "$sudoers_candidate" >/dev/null
+install -o root -g root -m 0440 \
+  "$sudoers_candidate" /etc/sudoers.d/agent-environment
+rm -f -- "$sudoers_candidate"
+
+environment_candidate=$(mktemp /etc/ade/.agent-environment.env.XXXXXX)
+temporary_files+=("$environment_candidate")
+awk -v source_root="$release_dir" '
+  /^ADE_SOURCE_ROOT=/ {
+    if (!replaced++) print "ADE_SOURCE_ROOT=" source_root
+    next
+  }
+  { print }
+  END { if (!replaced) print "ADE_SOURCE_ROOT=" source_root }
+' "$environment_file" >"$environment_candidate"
+install -o root -g root -m 0644 "$environment_candidate" "$environment_file"
+rm -f -- "$environment_candidate"
+
+python3 - "$manifest_file" "$release_dir" <<'PY'
+import json
+import os
+import stat
+import sys
+import tempfile
+
+path, source_root = sys.argv[1:]
+with open(path, encoding="utf-8") as config_file:
+    config = json.load(config_file)
+config["source_root"] = source_root
+metadata = os.stat(path)
+fd, temporary = tempfile.mkstemp(prefix=".agent-environment.", dir=os.path.dirname(path), text=True)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as config_file:
+        json.dump(config, config_file, ensure_ascii=False, indent=2)
+        config_file.write("\n")
+        config_file.flush()
+        os.fsync(config_file.fileno())
+    os.chown(temporary, metadata.st_uid, metadata.st_gid)
+    os.chmod(temporary, stat.S_IMODE(metadata.st_mode))
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+PY
+
+visudo -cf /etc/sudoers.d/agent-environment >/dev/null
+systemctl daemon-reload
+systemctl restart agent-environment.service
+
+set_stage health_check
+health_url=$(configured_health_url)
+if ! wait_for_health "$health_url"; then
+  failure="服務健康檢查失敗：$health_url"
+  exit 1
+fi
+
+deployment_succeeded=1
+switch_started=0
+terminal_status=succeeded
+stage=complete
+echo "Deployed local commit $sha from $release_dir"

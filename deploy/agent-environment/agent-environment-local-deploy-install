@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+repo_root=
+while (($#)); do
+  case "$1" in
+    --repo-root)
+      [[ $# -ge 2 ]] || { echo 'Usage: agent-environment-local-deploy-install --repo-root <path>' >&2; exit 2; }
+      repo_root=$2
+      shift 2
+      ;;
+    --help|-h)
+      echo 'Usage: sudo ./deploy/agent-environment/agent-environment-local-deploy-install --repo-root /absolute/path/to/repo'
+      exit 0
+      ;;
+    *) echo 'Usage: agent-environment-local-deploy-install --repo-root <path>' >&2; exit 2 ;;
+  esac
+done
+
+[[ $(id -u) == 0 ]] || { echo 'local deployment installer must run as root' >&2; exit 1; }
+[[ -n "$repo_root" && "$repo_root" == /* ]] || { echo '--repo-root must be an absolute path' >&2; exit 2; }
+repo_root=$(cd "$repo_root" && pwd -P)
+[[ -f "$repo_root/.git" || -d "$repo_root/.git" ]] || { echo 'repo root must be a Git working tree' >&2; exit 1; }
+[[ -f /etc/ade/agent-environment.env && -f /etc/ade/agent-environment.json ]] || {
+  echo 'Install the ADES service before enabling local deployment.' >&2
+  exit 1
+}
+id orca >/dev/null 2>&1 || { echo 'The orca service account is missing.' >&2; exit 1; }
+
+git_bin=$(command -v git)
+repo_owner=$(stat -c '%U' "$repo_root")
+[[ "$repo_owner" == orca ]] || { echo 'repo root must be owned by orca' >&2; exit 1; }
+runuser -u orca -- "$git_bin" -C "$repo_root" rev-parse --verify HEAD >/dev/null 2>&1 || {
+  echo 'repo root must contain a commit' >&2
+  exit 1
+}
+if runuser -u orca -- "$git_bin" -C "$repo_root" config --get core.hooksPath >/dev/null 2>&1; then
+  echo 'A custom core.hooksPath is configured; install the commit hook there manually.' >&2
+  exit 1
+fi
+
+hooks_dir=$(runuser -u orca -- "$git_bin" -C "$repo_root" rev-parse --path-format=absolute --git-path hooks)
+hook_path=$hooks_dir/post-commit
+if [[ -L "$hook_path" ]]; then
+  echo "Refusing to replace a symlink hook: $hook_path" >&2
+  exit 1
+fi
+if [[ -e "$hook_path" ]] && ! /usr/bin/grep -q 'Managed by ADE local deployment installer' "$hook_path"; then
+  echo "An existing post-commit hook is present: $hook_path" >&2
+  echo 'Preserve it and chain the ADE local deployment hook manually.' >&2
+  exit 1
+fi
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+for script in agent-environment-local-deploy-state agent-environment-local-deploy-trigger agent-environment-local-deploy; do
+  [[ -f "$script_dir/$script" && -x "$script_dir/$script" ]] || {
+    echo "Required local deployment helper is missing or not executable: $script_dir/$script" >&2
+    exit 1
+  }
+done
+[[ -f "$script_dir/agent-environment-local-deploy-install" && -x "$script_dir/agent-environment-local-deploy-install" ]] || {
+  echo 'The local deployment installer must be executable.' >&2
+  exit 1
+}
+for script in agent-environment-local-deploy-state agent-environment-local-deploy-trigger agent-environment-local-deploy; do
+  install -o root -g root -m 0755 "$script_dir/$script" "/usr/local/sbin/$script"
+done
+
+state_root=$(python3 -c 'import json,sys; config=json.load(open(sys.argv[1], encoding="utf-8")); print(config.get("state_root") or "/var/lib/ade/agent-environment")' /etc/ade/agent-environment.json)
+[[ "$state_root" == /* && "$state_root" != / ]] || { echo 'Configured state_root must be an absolute non-root path.' >&2; exit 1; }
+deployments_root=/home/orca/.local/share/ade-deployments
+install -d -o root -g orca -m 0750 "$state_root/local-deployments"
+install -d -o orca -g orca -m 0750 "$deployments_root" \
+  /home/orca/.cache/ade-local-deploy/npm /home/orca/.cache/go-build /home/orca/go/pkg/mod
+temporary_config=$(mktemp /tmp/agent-environment-local-deploy.env.XXXXXX)
+printf 'REPO_ROOT=%q\nSTATE_ROOT=%q\nDEPLOYMENTS_ROOT=%q\n' \
+  "$repo_root" "$state_root" "$deployments_root" >"$temporary_config"
+install -o root -g orca -m 0640 "$temporary_config" /etc/ade/agent-environment-local-deploy.env
+rm -f -- "$temporary_config"
+
+temporary_sudoers=$(mktemp /tmp/agent-environment-local-deploy.sudoers.XXXXXX)
+cat >"$temporary_sudoers" <<'EOF'
+orca ALL=(root) NOPASSWD: /usr/local/sbin/agent-environment-local-deploy-trigger *
+EOF
+visudo -cf "$temporary_sudoers" >/dev/null
+install -o root -g root -m 0440 "$temporary_sudoers" /etc/sudoers.d/agent-environment-local-deploy
+rm -f -- "$temporary_sudoers"
+
+install -d -o orca -g orca -m 0755 "$hooks_dir"
+temporary_hook=$(mktemp /tmp/agent-environment-post-commit.XXXXXX)
+cat >"$temporary_hook" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# Managed by ADE local deployment installer.
+repo_root=$(git rev-parse --show-toplevel)
+commit_sha=$(git -C "$repo_root" rev-parse --verify HEAD)
+if ! /usr/bin/sudo -n /usr/local/sbin/agent-environment-local-deploy-trigger "$commit_sha"; then
+  echo "Commit $commit_sha was created; local deployment could not be queued." >&2
+fi
+exit 0
+EOF
+install -o orca -g orca -m 0755 "$temporary_hook" "$hook_path"
+rm -f -- "$temporary_hook"
+
+if systemctl is-enabled --quiet agent-environment-cd.timer 2>/dev/null || systemctl is-active --quiet agent-environment-cd.timer; then
+  systemctl disable --now agent-environment-cd.timer
+fi
+if systemctl is-active --quiet agent-environment-cd.service; then
+  systemctl stop agent-environment-cd.service
+fi
+rm -f /etc/systemd/system/agent-environment-cd.timer /etc/systemd/system/agent-environment-cd.service
+rm -f /usr/local/sbin/agent-environment-cd-pull
+systemctl daemon-reload
+
+echo 'Installed local post-commit deployment and disabled GitHub polling.'
+echo "Commits in $repo_root will deploy once; monitor them in the ADES dashboard."

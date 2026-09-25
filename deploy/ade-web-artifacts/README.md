@@ -58,7 +58,6 @@ The command returns JSON with `access_url` and `entrypoint`. If the HTTP publish
 ## ADES integration
 
 The [ADES dashboard](../agent-environment/README.md#web-publishing-from-the-dashboard)
-can list, upload and delete publications in this same directory using wallet
-session authorization. Nginx remains the static content server on port 80; keep
+can list, upload and delete publications in this same directory using an authenticated session. Nginx remains the static content server on port 80; keep
 the dashboard on its separate origin. Existing CLI publications appear in the
 dashboard automatically, including bundles with nested HTML entrypoints.

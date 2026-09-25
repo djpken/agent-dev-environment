@@ -1,4 +1,4 @@
-name: CI/CD
+name: CI
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-cd-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -81,32 +81,3 @@ jobs:
       - name: Build Go packages
         if: ${{ hashFiles('go.mod') != '' }}
         run: go build ./...
-
-  promote:
-    name: Promote tested commit for VM deployment
-    needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - name: Check out source
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v7.0.1
-        with:
-          persist-credentials: true
-
-      - name: Promote only the latest tested main commit
-        env:
-          GITHUB_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          if [[ -f go.mod ]]; then
-            echo "The VM deploy adapter currently supports the Node service; refusing to promote a Go runtime."
-            exit 1
-          fi
-          latest_main="$(git ls-remote --refs origin refs/heads/main | awk 'NR == 1 { print $1 }')"
-          if [[ "$latest_main" != "$GITHUB_SHA" ]]; then
-            echo "main advanced to ${latest_main}; skipping stale deployment promotion"
-            exit 0
-          fi
-          git push origin "$GITHUB_SHA:refs/heads/deploy"

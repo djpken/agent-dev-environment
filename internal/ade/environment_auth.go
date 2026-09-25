@@ -3,25 +3,34 @@ package ade
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/crypto/scrypt"
 )
 
-const SessionScope = "Manage this VM within your wallet role for 12 hours. Scheduled updates remain enabled until disabled."
 const sessionHours = 12
+const passwordScryptN = 1 << 15
+const passwordScryptR = 8
+const passwordScryptP = 1
+const passwordHashBytes = 32
+
+var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._@+-]{0,127}$`)
 
 type EnvironmentAuthority struct {
-	Config                                *EnvironmentConfig
-	Root, StatePath, LockPath, PolicyPath string
-	Owner                                 uint32
+	Config                                              *EnvironmentConfig
+	Root, StatePath, LockPath, PolicyPath, AccountsPath string
+	Owner                                               uint32
 }
 
 func NewEnvironmentAuthority(config *EnvironmentConfig) (*EnvironmentAuthority, error) {
@@ -49,7 +58,7 @@ func NewEnvironmentAuthority(config *EnvironmentConfig) (*EnvironmentAuthority, 
 	if err := os.Chmod(root, 0o755); err != nil {
 		return nil, err
 	}
-	authority := &EnvironmentAuthority{Config: config, Root: root, StatePath: filepath.Join(root, "sessions.json"), LockPath: filepath.Join(root, ".lock"), PolicyPath: filepath.Join(root, "policy.json"), Owner: owner}
+	authority := &EnvironmentAuthority{Config: config, Root: root, StatePath: filepath.Join(root, "sessions.json"), LockPath: filepath.Join(root, ".lock"), PolicyPath: filepath.Join(root, "policy.json"), AccountsPath: filepath.Join(root, "accounts.json"), Owner: owner}
 	if err := authority.checkPath(root, true); err != nil {
 		return nil, err
 	}
@@ -120,10 +129,178 @@ func (a *EnvironmentAuthority) write(state Object) error { return WriteJSON(a.St
 func tokenID(token any) (string, error) {
 	value, ok := token.(string)
 	if !ok || len(value) < 32 || len(value) > 128 {
-		return "", fmt.Errorf("wallet session expired")
+		return "", fmt.Errorf("session expired")
 	}
 	hash := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(hash[:]), nil
+}
+
+func normalizeUsername(value any) (string, error) {
+	username, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("invalid credentials")
+	}
+	username = strings.ToLower(strings.TrimSpace(username))
+	if !usernamePattern.MatchString(username) {
+		return "", fmt.Errorf("invalid credentials")
+	}
+	return username, nil
+}
+
+func passwordHash(password string, salt []byte) ([]byte, error) {
+	return scrypt.Key([]byte(password), salt, passwordScryptN, passwordScryptR, passwordScryptP, passwordHashBytes)
+}
+
+func (a *EnvironmentAuthority) loadAccounts() (Object, error) {
+	if _, err := os.Lstat(a.AccountsPath); os.IsNotExist(err) {
+		return Object{}, nil
+	} else if err != nil {
+		return nil, err
+	}
+	if err := a.checkPath(a.AccountsPath, false); err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(a.AccountsPath)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return nil, fmt.Errorf("account storage must be private to its owner")
+	}
+	stored, err := ReadJSON(a.AccountsPath)
+	if err != nil {
+		return nil, err
+	}
+	return validateAccountStore(stored, a.Config.VMID)
+}
+
+func validateAccountStore(stored Object, vmID string) (Object, error) {
+	if stored["vm_id"] != vmID {
+		return nil, fmt.Errorf("account storage VM identity does not match")
+	}
+	users := object(stored["users"])
+	if users == nil {
+		return nil, fmt.Errorf("account storage is invalid")
+	}
+	for username, raw := range users {
+		account := object(raw)
+		if account == nil || account["username"] != username || !usernamePattern.MatchString(username) || roleRank(fmt.Sprint(account["role"])) < 0 {
+			return nil, fmt.Errorf("account storage is invalid")
+		}
+		if _, ok := account["credential_id"].(string); !ok {
+			return nil, fmt.Errorf("account storage is invalid")
+		}
+		salt, saltOK := account["salt"].(string)
+		hash, hashOK := account["password_hash"].(string)
+		decodedSalt, saltErr := base64.RawStdEncoding.DecodeString(salt)
+		decodedHash, hashErr := base64.RawStdEncoding.DecodeString(hash)
+		if !saltOK || !hashOK || saltErr != nil || hashErr != nil || len(decodedSalt) != 16 || len(decodedHash) != passwordHashBytes || fmt.Sprint(account["hash_version"]) != "1" {
+			return nil, fmt.Errorf("account storage is invalid")
+		}
+	}
+	return users, nil
+}
+
+func newPasswordAccount(username, password, role string) (Object, error) {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, err
+	}
+	hash, err := passwordHash(password, salt)
+	if err != nil {
+		return nil, err
+	}
+	return Object{
+		"username": username, "role": role,
+		"credential_id": randomUUID(), "hash_version": 1,
+		"salt":          base64.RawStdEncoding.EncodeToString(salt),
+		"password_hash": base64.RawStdEncoding.EncodeToString(hash),
+	}, nil
+}
+
+// SetAccount is a local, root-only bootstrap and password rotation operation.
+// It is intentionally absent from Dispatch so the HTTP helper cannot provision accounts.
+func (a *EnvironmentAuthority) SetAccount(username, password, role string) error {
+	if os.Geteuid() != 0 || a.Owner != 0 {
+		return fmt.Errorf("account setup requires root and a root-owned config")
+	}
+	normalized, err := normalizeUsername(username)
+	if err != nil {
+		return fmt.Errorf("username must be 1-128 characters using letters, numbers, dot, underscore, at, plus, or hyphen")
+	}
+	if roleRank(role) < 0 {
+		return fmt.Errorf("role must be viewer, operator, or admin")
+	}
+	if len(password) < 12 || len(password) > 1024 {
+		return fmt.Errorf("password must be between 12 and 1024 bytes")
+	}
+	return Lock(a.LockPath, false, func() error {
+		state, err := a.load()
+		if err != nil {
+			return err
+		}
+		users, err := a.loadAccounts()
+		if err != nil {
+			return err
+		}
+		account, err := newPasswordAccount(normalized, password, role)
+		if err != nil {
+			return err
+		}
+		users[normalized] = account
+		if err := WriteJSON(a.AccountsPath, Object{"vm_id": a.Config.VMID, "users": users}, 0o600); err != nil {
+			return err
+		}
+		removedSessions := map[string]bool{}
+		for id, raw := range authMap(state, "sessions") {
+			if account := object(raw); account != nil && account["username"] == normalized {
+				delete(authMap(state, "sessions"), id)
+				removedSessions[id] = true
+			}
+		}
+		for id, raw := range authMap(state, "approvals") {
+			if approval := object(raw); approval != nil && removedSessions[fmt.Sprint(approval["session_id"])] {
+				delete(authMap(state, "approvals"), id)
+			}
+		}
+		return a.write(state)
+	})
+}
+
+func (a *EnvironmentAuthority) register(state, request Object) (Object, error) {
+	username, err := normalizeUsername(request["username"])
+	password, passwordOK := request["password"].(string)
+	if err != nil || !passwordOK || len(password) < 12 || len(password) > 1024 {
+		return nil, fmt.Errorf("username or password is invalid")
+	}
+	users, err := a.loadAccounts()
+	if err != nil {
+		return nil, err
+	}
+	if len(users) != 0 {
+		return nil, fmt.Errorf("registration is already complete")
+	}
+	account, err := newPasswordAccount(username, password, "admin")
+	if err != nil {
+		return nil, err
+	}
+	users[username] = account
+	if err := WriteJSON(a.AccountsPath, Object{"vm_id": a.Config.VMID, "users": users}, 0o600); err != nil {
+		return nil, err
+	}
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return nil, err
+	}
+	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
+	issued := Object{
+		"username": username, "role": "admin", "account_version": account["credential_id"],
+		"expires_at": time.Now().UTC().Add(sessionHours * time.Hour).Format(time.RFC3339),
+	}
+	authMap(state, "sessions")[sha256Hex(token)] = issued
+	return Object{
+		"session": token, "username": username, "role": "admin", "expires_at": issued["expires_at"],
+	}, nil
 }
 
 func walletRole(config *EnvironmentConfig, address string) string {
@@ -150,116 +327,74 @@ func roleRank(role string) int {
 func (a *EnvironmentAuthority) session(state Object, id, minimum string) (Object, error) {
 	stored := object(authMap(state, "sessions")[id])
 	if stored == nil {
-		return nil, fmt.Errorf("wallet session expired")
+		return nil, fmt.Errorf("session expired")
 	}
 	expiry, _ := stored["expires_at"].(string)
 	expires, err := parseTimestamp(expiry)
 	if err != nil || !expires.After(time.Now().UTC()) {
-		return nil, fmt.Errorf("wallet session expired")
+		return nil, fmt.Errorf("session expired")
 	}
-	address, _ := stored["address"].(string)
-	current := walletRole(a.Config, address)
-	if current == "" {
-		return nil, fmt.Errorf("wallet is not enrolled for this VM")
+	username, _ := stored["username"].(string)
+	users, err := a.loadAccounts()
+	if err != nil {
+		return nil, err
 	}
-	storedRole, _ := stored["role"].(string)
-	role := storedRole
-	if roleRank(current) < roleRank(role) {
-		role = current
+	current := object(users[username])
+	if current == nil || stored["account_version"] != current["credential_id"] {
+		return nil, fmt.Errorf("session is no longer valid")
 	}
+	role, _ := current["role"].(string)
 	if roleRank(role) < roleRank(minimum) {
-		return nil, fmt.Errorf("wallet role %s required", minimum)
+		return nil, fmt.Errorf("account role %s required", minimum)
 	}
-	result := Object{}
-	for key, value := range stored {
-		result[key] = value
-	}
-	result["role"] = role
-	return result, nil
-}
-
-func (a *EnvironmentAuthority) challenge(state Object, request Object) (Object, error) {
-	address, err := NormalizeWalletAddress(request["address"])
-	if err != nil {
-		return nil, err
-	}
-	origin := a.Config.PublicOrigin
-	if text, ok := request["origin"].(string); ok && text != "" {
-		origin = text
-	}
-	allowed := origin == a.Config.PublicOrigin
-	for _, candidate := range a.Config.AllowedOrigins {
-		if origin == candidate {
-			allowed = true
-		}
-	}
-	if !allowed {
-		return nil, fmt.Errorf("origin is not allowed")
-	}
-	challenges := authMap(state, "challenges")
-	if len(challenges) >= 1000 {
-		return nil, fmt.Errorf("too many pending authentication challenges")
-	}
-	id := randomUUID()
-	nonceBytes := make([]byte, 24)
-	if _, err := rand.Read(nonceBytes); err != nil {
-		return nil, err
-	}
-	issued := isoNow()
-	expires := time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339)
-	challenge := Object{"challenge_id": id, "address": address, "issued_at": issued, "expires_at": expires}
-	binding := sha256Hex(a.Config.VMID)
-	messagePayload := Object{"challenge_id": id, "address": address, "issued_at": issued, "expires_at": expires, "action": "login", "origin": origin, "vm_binding": binding, "nonce": base64.RawURLEncoding.EncodeToString(nonceBytes), "scope": SessionScope}
-	encoded, err := CanonicalJSON(messagePayload, false, false)
-	if err != nil {
-		return nil, err
-	}
-	challenge["message"] = "ADE-ENVIRONMENT-SESSION-V1\n" + string(encoded)
-	challenges[id] = challenge
-	return challenge, nil
+	return Object{"username": username, "role": role, "expires_at": expiry}, nil
 }
 
 func (a *EnvironmentAuthority) login(state, request Object) (Object, error) {
-	address, err := NormalizeWalletAddress(request["address"])
+	username, err := normalizeUsername(request["username"])
+	password, passwordOK := request["password"].(string)
+	if err != nil || !passwordOK || len(password) < 1 || len(password) > 1024 {
+		return nil, fmt.Errorf("invalid credentials")
+	}
+	users, err := a.loadAccounts()
 	if err != nil {
 		return nil, err
 	}
-	id, ok := request["challenge_id"].(string)
-	if !ok {
-		return nil, fmt.Errorf("challenge_id, address, message, and signature are required")
+	account := object(users[username])
+	var salt []byte
+	if account != nil {
+		encodedSalt, _ := account["salt"].(string)
+		salt, err = base64.RawStdEncoding.DecodeString(encodedSalt)
+		if err != nil {
+			return nil, fmt.Errorf("account storage is invalid")
+		}
+	} else {
+		salt = []byte("ade-unknown-account-v1")
 	}
-	message, ok := request["message"].(string)
-	if !ok {
-		return nil, fmt.Errorf("challenge_id, address, message, and signature are required")
+	actual, err := passwordHash(password, salt)
+	if err != nil {
+		return nil, err
 	}
-	signature, ok := request["signature"].(string)
-	if !ok {
-		return nil, fmt.Errorf("challenge_id, address, message, and signature are required")
+	if account == nil {
+		return nil, fmt.Errorf("invalid credentials")
 	}
-	challenges := authMap(state, "challenges")
-	challenge := object(challenges[id])
-	if challenge == nil || challenge["address"] != address || challenge["message"] != message {
-		return nil, fmt.Errorf("authentication challenge is invalid")
+	encodedHash, _ := account["password_hash"].(string)
+	expected, err := base64.RawStdEncoding.DecodeString(encodedHash)
+	if err != nil || subtle.ConstantTimeCompare(actual, expected) != 1 {
+		return nil, fmt.Errorf("invalid credentials")
 	}
-	if !VerifyWalletSignature(address, []byte(message), signature) {
-		return nil, fmt.Errorf("wallet signature is invalid")
-	}
-	role := walletRole(a.Config, address)
-	if role == "" {
-		return nil, fmt.Errorf("wallet is not enrolled for this VM")
-	}
+	role, _ := account["role"].(string)
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return nil, err
 	}
 	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
-	session := Object{"address": address, "role": role, "expires_at": time.Now().UTC().Add(sessionHours * time.Hour).Format(time.RFC3339)}
-	delete(challenges, id)
+	session := Object{"username": username, "role": role, "account_version": account["credential_id"], "expires_at": time.Now().UTC().Add(sessionHours * time.Hour).Format(time.RFC3339)}
 	authMap(state, "sessions")[sha256Hex(token)] = session
 	result := Object{"session": token}
-	for key, value := range session {
-		result[key] = value
-	}
+	result["username"] = username
+	result["role"] = role
+	result["expires_at"] = session["expires_at"]
 	return result, nil
 }
 
@@ -329,8 +464,21 @@ func (a *EnvironmentAuthority) Dispatch(request Object) (Object, error) {
 		if !ok {
 			return fmt.Errorf("authorization operation must be text")
 		}
-		if operation == "challenge" {
-			result, err = a.challenge(state, request)
+		if operation == "setup_status" {
+			users, err := a.loadAccounts()
+			if err != nil {
+				return err
+			}
+			result = Object{"registered": len(users) != 0}
+			return nil
+		}
+		if operation == "register" {
+			result, err = a.register(state, request)
+			if err != nil {
+				return err
+			}
+		} else if operation == "webdav_import" {
+			result, err = a.importEnvironmentBackup(request, state)
 			if err != nil {
 				return err
 			}
@@ -352,7 +500,7 @@ func (a *EnvironmentAuthority) Dispatch(request Object) (Object, error) {
 				if operation == "authorize_run" {
 					minimum = "operator"
 				}
-				if operation == "save_policy" {
+				if operation == "save_policy" || operation == "webdav_backup" {
 					minimum = "admin"
 				}
 				session, err := a.session(state, sessionID, minimum)
@@ -377,7 +525,7 @@ func (a *EnvironmentAuthority) Dispatch(request Object) (Object, error) {
 					if err != nil {
 						return err
 					}
-					run, err := store.Create("manual", ids, fmt.Sprint(session["address"]), action, targets, Object{"kind": "session"})
+					run, err := store.Create("manual", ids, fmt.Sprint(session["username"]), action, targets, Object{"kind": "session"})
 					if err != nil {
 						return err
 					}
@@ -414,13 +562,26 @@ func (a *EnvironmentAuthority) Dispatch(request Object) (Object, error) {
 					policy["policy_id"] = randomUUID()
 					policy["vm_id"] = a.Config.VMID
 					policy["enabled"] = enabled
-					policy["signer"] = session["address"]
+					policy["signer"] = session["username"]
 					policy["authorization"] = "session"
 					policy["updated_at"] = isoNow()
 					if err := WriteJSON(a.PolicyPath, policy, 0o644); err != nil {
 						return err
 					}
 					result = PolicyPublic(policy, a.Config)
+				case "webdav_backup":
+					passphrase, ok := request["backup_passphrase"].(string)
+					if !ok || len(passphrase) < environmentBackupPassMinSize || len(passphrase) > 1024 {
+						return fmt.Errorf("backup passphrase must be between 12 and 1024 bytes")
+					}
+					backup, err := a.createEnvironmentBackup(passphrase)
+					if err != nil {
+						return err
+					}
+					if err := uploadWebDAVBackup(request, backup); err != nil {
+						return err
+					}
+					result = Object{"backed_up": true, "size_bytes": len(backup)}
 				default:
 					return fmt.Errorf("unsupported authorization operation")
 				}

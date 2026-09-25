@@ -107,17 +107,19 @@ operator／admin 可上傳 HTML 或完整資料夾、選擇首頁、確認覆蓋
 
 ## ADES · Agent Development Environment Service
 
-ADES 是每台 VM 獨立的管理面，與 Web artifact publisher 分開。Dashboard 使用 React、TypeScript、Vite；ADES API、ADE CLI、provider lifecycle、host adapter、sync、scheduler、wallet 授權與更新 runtime 都由 Go binary 提供。Go `net/http` server 維持既有同 origin JSON API，並直接提供 dashboard 靜態檔案。systemd、更新器與 root-owned helpers 都呼叫同一個 `/usr/local/bin/ade`，不再啟動 Python 或 Node server。Node.js 與 npm 僅在安裝時建置 React dashboard。ADES 以 allowlist 登錄 Orca、Codex、Capability provider 與 VM services，提供登入後可讀取的 health/dashboard、JSON API、session 授權的手動操作、持續生效的 Update policy 與 update history。元件可宣告 `target_version_arg`，讓核准的目標版本以 argv 傳給固定更新器；內建 Orca updater 會驗證 release manifest 的版本、大小與 SHA-512。
+ADES 的 Skills 與 MCP 手動更新檢查方式見[監控文件](./agent-assets-monitoring.md)。
+
+ADES 是每台 VM 獨立的管理面，與 Web artifact publisher 分開。Dashboard 使用 React、TypeScript、Vite；ADES API、ADE CLI、provider lifecycle、host adapter、sync、scheduler、密碼授權與更新 runtime 都由 Go binary 提供。Go net/http server 維持同 origin JSON API，並直接提供 dashboard 靜態檔案。systemd、更新器與 root-owned helpers 都呼叫同一個 /usr/local/bin/ade，不再啟動 Python 或 Node server。Node.js 與 npm 僅在安裝時建置 React dashboard。ADES 以 allowlist 登錄 Orca、Codex、Capability provider 與 VM services，提供登入後可讀取的 health/dashboard、JSON API、session 授權的手動操作、持續生效的 Update policy 與 update history。元件可宣告 target_version_arg，讓核准的目標版本以 argv 傳給固定更新器；內建 Orca updater 會驗證 release manifest 的版本、大小與 SHA-512。
 
 Linux + systemd VM 可用 [`deploy/agent-environment/`](../deploy/agent-environment/) 安裝。安裝需要 Go `1.27.1`、Node.js `22.12+` 與 npm。安裝器依 `go.mod` 編譯 Go binary，依 `web/package-lock.json` 建置 React dashboard，systemd 直接啟動 `/usr/local/bin/ade environment serve`。Go binary 同時提供 ADE CLI、管理 API 與更新 worker。預設管理面使用 HTTPS port `6790`，每日 `04:00 UTC+8` 執行更新，也就是 `20:00 UTC`；`Persistent=true` 會在 VM 錯過時間後補跑。更新由 root-owned helper 執行，Orca 與 Codex 會依 manifest 的固定 command 更新，MCP 與其他 service 只有登錄後才會被管理。
 
 管理頁面也可由 Nginx 提供標準 `80／443` 入口：HTTP 首頁導向 HTTPS 管理頁面，作品維持 HTTP `80` 的獨立 origin。設定方式見 [Nginx 整合說明](../deploy/agent-environment/README.md#standard-http-and-https-entrypoints)。
 
-管理面可設定 `allow_http: true`、`tls: {}` 與 HTTP `public_origin`，供公司 VPN／Tailscale 直接存取；額外入口須加入 `allowed_origins`。HTTP 的傳輸保護由外部網路提供。登入使用 VM、origin、nonce 與期限綁定的自訂 challenge，非 SIWE。
+管理面可設定 allow_http: true、tls: {} 與 HTTP backend，再由 Nginx 提供 HTTPS origin。密碼登入只接受直接 TLS，或由 loopback reverse proxy 傳入並標記 X-Forwarded-Proto: https 的請求。遠端 HTTP 即使位於可信 VPN 也不能登入。登入表單使用標準 username 與 current-password autocomplete，支援 1Password。
 
-未登入時可查看公開的唯讀 GitHub Trending 與 Trendshift 即時排行；`GET /api/v1/trending` 只接受固定來源與每日／每週／每月期間，每個來源與期間在 VM 記憶體快取 45 秒，不保存候選或排行資料。環境管理 API，包含 `/healthz`，仍需要 wallet session。首次連接 wallet 時可開始 `Wallet registration`，使用者以 browser wallet 簽署一次性註冊訊息後成為該 VM 的 admin。登入再簽署一次，建立 12 小時的 Wallet-authorized session；有效期間內，角色允許的更新、重啟與排程設定免再次簽署。同一分頁重新整理會恢復並驗證 session。Root helper 保存 token 雜湊及一次性操作核准紀錄，執行前會再次檢查 session 與角色。更新失敗時，更新器依 manifest 執行 rollback。
+未登入時可查看公開的唯讀 GitHub Trending 與 Trendshift 即時排行；GET /api/v1/trending 只接受固定來源與每日／每週／每月期間，每個來源與期間在 VM 記憶體快取 45 秒，不保存候選或排行資料。帳號空白時，dashboard 提供一次性 admin 註冊或 WebDAV 備份匯入；註冊或匯入完成後不再開放公開註冊。管理員也能把環境設定加密後備份到 WebDAV。備份包含 ADES manifest、帳號雜湊與有效更新政策，使用 scrypt 與 AES-256-GCM；匯入僅接受相同 VM ID、source_root 與 state_root，並在服務設定變更時排程重啟。備份不包含 session、執行歷史、WebDAV 憑證或 TLS 私鑰。root-only `ade environment account set` 仍可建立或更新帳號供恢復使用。密碼以 salted scrypt hash 存在 root-owned accounts.json，bearer token 只以雜湊保存。登入 session 有效 12 小時，可在同分頁重新整理後驗證恢復；帳號更新會撤銷該帳號的 session 與待執行核准。Viewer 可讀取；operator 與 admin 可手動更新或重啟元件；只有 admin 可修改每日更新政策。更新器執行前仍會檢查 root-owned manifest、元件依賴與一次性核准。
 
-Admin 可啟用、修改或停用每日更新。新排程沒有到期日，登出、session 過期或原設定者的身份異動都不會取消排程；執行時仍受 VM 與元件 allowlist 限制。設定保存在 root-owned `/etc/ade/agent-environment.auth/policy.json`，既有共用 state 中的簽署 policy 僅作為尚未替換時的相容來源。升級前須安裝 `agent-environment-authorize` helper 與 sudoers entry，再重啟管理服務，詳見 [部署文件](../deploy/agent-environment/README.md)與 [ADR-0013](adr/0013-wallet-authorized-environment-session.md)。
+Admin 可啟用、修改或停用每日更新。新排程沒有到期日，登出、session 過期或原設定者的身份異動都不會取消排程；執行時仍受 VM 與元件 allowlist 限制。設定保存在 root-owned `/etc/ade/agent-environment.auth/policy.json`，既有共用 state 中的簽署 policy 僅作為尚未替換時的相容來源。升級前須安裝 `agent-environment-authorize` helper 與 sudoers entry，再重啟管理服務，詳見 [部署文件](../deploy/agent-environment/README.md)與 [ADR-0014](adr/0014-password-authenticated-environment-session.md)。
 
 `Environment status snapshot` 預設不發布，VM opt-in 後才用 `ade publish-html` 發布到獨立的 artifact publisher；snapshot 只含 sanitized health、版本與時間資訊。
 

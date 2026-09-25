@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -97,7 +98,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stdout, `Usage: ade [--root PATH] <operation> [options]
 
 Operations: plan, apply, rollback, status, doctor, attach, provider, review,
-publish-html, sync, schedule install, environment serve|status|update|authorize|enroll|enroll-signed|trending|artifacts|fail-run`)
+publish-html, sync, schedule install, environment serve|status|update|authorize|account|enroll|enroll-signed|trending|artifacts|fail-run`)
 }
 
 func active(root string) (string, ade.Object, error) {
@@ -395,6 +396,31 @@ func decodeObject(data []byte, message string) (ade.Object, error) {
 	return value, nil
 }
 
+func readHiddenPassword(prompt string) (string, error) {
+	info, err := os.Stdin.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return "", errors.New("password setup requires an interactive terminal")
+	}
+	fmt.Fprint(os.Stderr, prompt)
+	command := exec.Command("stty", "-echo")
+	command.Stdin = os.Stdin
+	if err := command.Run(); err != nil {
+		return "", errors.New("could not disable terminal echo")
+	}
+	defer func() {
+		restore := exec.Command("stty", "echo")
+		restore.Stdin = os.Stdin
+		_ = restore.Run()
+		fmt.Fprintln(os.Stderr)
+	}()
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && len(line) == 0 {
+		return "", err
+	}
+	line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+	return line, nil
+}
+
 func environmentCommand(args []string) (int, error) {
 	if len(args) == 0 {
 		return 1, errors.New("environment operation is required")
@@ -404,8 +430,8 @@ func environmentCommand(args []string) (int, error) {
 	positionals := []string{}
 	var err error
 	switch operation {
-	case "serve", "status", "trending", "authorize", "enroll", "enroll-signed", "fail-run", "artifacts", "update":
-		options := map[string]optionSpec{"config": {}, "host": {}, "port": {}, "source": {}, "since": {}, "address": {}, "role": {}, "request-json": {}, "run-id": {}, "error": {}, "trigger": {}, "requested-by": {}, "component": {repeated: true}}
+	case "serve", "status", "trending", "authorize", "account", "enroll", "enroll-signed", "fail-run", "artifacts", "update":
+		options := map[string]optionSpec{"config": {}, "host": {}, "port": {}, "source": {}, "since": {}, "address": {}, "username": {}, "role": {}, "request-json": {}, "run-id": {}, "error": {}, "trigger": {}, "requested-by": {}, "component": {repeated: true}}
 		positionals, values, err = parseOptions(args[1:], options)
 	default:
 		return 1, fmt.Errorf("unknown environment operation: %s", operation)
@@ -413,7 +439,10 @@ func environmentCommand(args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	if operation != "artifacts" && len(positionals) > 0 {
+	if operation == "account" && (len(positionals) != 1 || positionals[0] != "set") {
+		return 1, errors.New("account requires set")
+	}
+	if operation != "artifacts" && operation != "account" && len(positionals) > 0 {
 		return 1, fmt.Errorf("unexpected argument: %s", positionals[0])
 	}
 	configPath := value(values, "config", ade.DefaultEnvironmentConfig)
@@ -436,6 +465,39 @@ func environmentCommand(args []string) (int, error) {
 		return 1, err
 	}
 	switch operation {
+	case "account":
+		info, err := os.Stat(config.Path)
+		if err != nil {
+			return 1, errors.New("account setup requires root and a root-owned config")
+		}
+		owner, ownerOK := info.Sys().(*syscall.Stat_t)
+		if os.Geteuid() != 0 || !ownerOK || owner.Uid != 0 || info.Mode().Perm()&0o022 != 0 {
+			return 1, errors.New("account setup requires root and a root-owned config")
+		}
+		username, err := requiredValue(values, "username")
+		if err != nil {
+			return 1, err
+		}
+		password, err := readHiddenPassword("New password: ")
+		if err != nil {
+			return 1, err
+		}
+		confirmation, err := readHiddenPassword("Confirm password: ")
+		if err != nil {
+			return 1, err
+		}
+		if password != confirmation {
+			return 1, errors.New("passwords do not match")
+		}
+		authority, err := ade.NewEnvironmentAuthority(config)
+		if err != nil {
+			return 1, err
+		}
+		role := value(values, "role", "admin")
+		if err := authority.SetAccount(username, password, role); err != nil {
+			return 1, err
+		}
+		return 0, emitJSON(ade.Object{"account_set": true, "username": strings.ToLower(strings.TrimSpace(username)), "role": role})
 	case "authorize":
 		info, err := os.Stat(config.Path)
 		if err != nil {

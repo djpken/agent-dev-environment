@@ -32,27 +32,21 @@ type APIError struct {
 func (e *APIError) Error() string               { return e.Message }
 func apiError(status int, message string) error { return &APIError{Status: status, Message: message} }
 
-type registrationChallenge struct {
-	address, message string
-	expires          time.Time
-	created          time.Time
-}
 type statusEntry struct {
 	expires time.Time
 	value   Object
 }
 type ManagementServer struct {
-	Config       *EnvironmentConfig
-	UIRoot       string
-	trending     *TrendingService
-	mu           sync.Mutex
-	status       map[string]statusEntry
-	registration map[string]registrationChallenge
-	failures     map[string][]time.Time
+	Config   *EnvironmentConfig
+	UIRoot   string
+	trending *TrendingService
+	mu       sync.Mutex
+	status   map[string]statusEntry
+	failures map[string][]time.Time
 }
 
 func NewManagementServer(config *EnvironmentConfig, uiRoot string) *ManagementServer {
-	return &ManagementServer{Config: config, UIRoot: uiRoot, trending: NewTrendingService(), status: map[string]statusEntry{}, registration: map[string]registrationChallenge{}, failures: map[string][]time.Time{}}
+	return &ManagementServer{Config: config, UIRoot: uiRoot, trending: NewTrendingService(), status: map[string]statusEntry{}, failures: map[string][]time.Time{}}
 }
 
 func (s *ManagementServer) authorization(operation string, payload Object) (Object, error) {
@@ -69,7 +63,11 @@ func (s *ManagementServer) authorization(operation string, payload Object) (Obje
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	timeout := 30 * time.Second
+	if operation == "webdav_import" || operation == "webdav_backup" {
+		timeout = 45 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, "/usr/bin/sudo", "-n", helper)
 	command.Dir = s.Config.SourceRoot
@@ -81,14 +79,14 @@ func (s *ManagementServer) authorization(operation string, payload Object) (Obje
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	if err := command.Run(); err != nil {
-		return nil, apiError(503, "wallet authorization helper is unavailable")
+		return nil, apiError(503, "authorization helper is unavailable")
 	}
 	if stdout.overflow {
-		return nil, apiError(502, "wallet authorization helper returned too much data")
+		return nil, apiError(502, "authorization helper returned too much data")
 	}
 	result, err := DecodeJSON(stdout.Bytes())
 	if err != nil {
-		return nil, apiError(502, "wallet authorization helper returned invalid JSON")
+		return nil, apiError(502, "authorization helper returned invalid JSON")
 	}
 	if message, ok := result["error"].(string); ok {
 		return nil, apiError(authorizationStatus(message), message)
@@ -117,25 +115,28 @@ func (b *limitedBuffer) Write(data []byte) (int, error) {
 func (b *limitedBuffer) Bytes() []byte { return b.data }
 
 func authorizationStatus(message string) int {
-	if strings.Contains(message, "expired") || strings.Contains(message, "session") || strings.Contains(message, "enrolled") {
+	if strings.Contains(message, "registration is already complete") || strings.Contains(message, "only available before the first account") || strings.Contains(message, "while an update run is active") {
+		return 409
+	}
+	if message == "invalid credentials" || strings.Contains(message, "session expired") || strings.Contains(message, "session required") || strings.Contains(message, "session is no longer valid") {
 		return 401
 	}
-	if strings.Contains(message, "role") || strings.Contains(message, "origin is not allowed") {
+	if strings.Contains(message, "role") {
 		return 403
 	}
-	if strings.Contains(message, "registration is already complete") {
-		return 409
+	if strings.Contains(message, "authorization storage") || strings.Contains(message, "account storage") {
+		return 503
 	}
 	return 400
 }
 func readBearer(request *http.Request) (string, error) {
 	value := request.Header.Get("Authorization")
 	if !strings.HasPrefix(value, "Bearer ") {
-		return "", apiError(401, "wallet session required")
+		return "", apiError(401, "session required")
 	}
 	token := strings.TrimSpace(strings.TrimPrefix(value, "Bearer "))
 	if token == "" {
-		return "", apiError(401, "wallet session required")
+		return "", apiError(401, "session required")
 	}
 	return token, nil
 }
@@ -201,7 +202,7 @@ func setSecurityHeaders(writer http.ResponseWriter) {
 	writer.Header().Set("X-Content-Type-Options", "nosniff")
 	writer.Header().Set("X-Frame-Options", "DENY")
 	writer.Header().Set("Referrer-Policy", "no-referrer")
-	writer.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://ethereum-rpc.publicnode.com wss://mm-sdk-relay.api.cx.metamask.io; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+	writer.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
 }
 
 func (s *ManagementServer) dispatch(writer http.ResponseWriter, request *http.Request) error {
@@ -212,7 +213,7 @@ func (s *ManagementServer) dispatch(writer http.ResponseWriter, request *http.Re
 		if _, err := s.requireSession(request, "viewer"); err != nil {
 			return err
 		}
-		return writeJSONResponse(writer, 200, Object{"status": "ok", "service": "agent-environment", "vm_id": s.Config.VMID, "registration_required": len(s.Config.Wallets) == 0})
+		return writeJSONResponse(writer, 200, Object{"status": "ok", "service": "agent-environment", "vm_id": s.Config.VMID})
 	case method == "GET" && path == "/api/v1/trending":
 		for key, values := range request.URL.Query() {
 			if (key != "source" && key != "since") || len(values) != 1 {
@@ -235,57 +236,67 @@ func (s *ManagementServer) dispatch(writer http.ResponseWriter, request *http.Re
 			return apiError(502, "trending source is unavailable")
 		}
 		return writeJSONResponse(writer, 200, result)
-	case method == "GET" && path == "/api/v1/registration/challenge":
-		address, err := queryExactlyOnce(request, "address", true)
-		if err != nil {
-			return err
+	case method == "POST" && path == "/api/v1/auth/login":
+		if !securePasswordRequest(request) {
+			return apiError(400, "HTTPS is required for password login")
 		}
-		result, err := s.registrationChallenge(address)
-		if err != nil {
-			return err
-		}
-		return writeJSONResponse(writer, 200, result)
-	case method == "POST" && path == "/api/v1/registration":
 		body, err := readObjectBody(request, maxJSONRequestBytes)
 		if err != nil {
 			return err
 		}
-		if err := validateSignatureBody(body); err != nil {
-			return err
-		}
-		result, err := s.registerWallet(body)
-		if err != nil {
-			return err
-		}
-		return writeJSONResponse(writer, 200, result)
-	case method == "GET" && path == "/api/v1/auth/challenge":
-		address, err := queryExactlyOnce(request, "address", true)
-		if err != nil {
-			return err
-		}
-		origin, err := queryExactlyOnce(request, "origin", false)
-		if err != nil {
-			return err
-		}
-		payload := Object{"address": address}
-		if origin != "" {
-			payload["origin"] = origin
-		}
-		result, err := s.authorization("challenge", payload)
-		if err != nil {
-			return err
-		}
-		return writeJSONResponse(writer, 200, result)
-	case method == "POST" && path == "/api/v1/auth/verify":
-		body, err := readObjectBody(request, maxJSONRequestBytes)
-		if err != nil {
-			return err
-		}
-		if err := validateSignatureBody(body); err != nil {
+		if err := validateLoginBody(body); err != nil {
 			return err
 		}
 		result, err := s.verifyAuth(body, requestIP(request))
 		if err != nil {
+			return err
+		}
+		return writeJSONResponse(writer, 200, result)
+	case method == "GET" && path == "/api/v1/auth/setup-status":
+		result, err := s.authorization("setup_status", Object{})
+		if err != nil {
+			return err
+		}
+		return writeJSONResponse(writer, 200, result)
+	case method == "POST" && path == "/api/v1/auth/register":
+		if !securePasswordRequest(request) {
+			return apiError(400, "HTTPS is required for password registration")
+		}
+		body, err := readObjectBody(request, maxJSONRequestBytes)
+		if err != nil {
+			return err
+		}
+		if err := validateLoginBody(body); err != nil {
+			return err
+		}
+		ip := requestIP(request)
+		if !s.authFailureAllowed(ip) {
+			return apiError(429, "too many authentication failures")
+		}
+		result, err := s.authorization("register", Object{"username": body["username"], "password": body["password"]})
+		if err != nil {
+			s.noteAuthFailure(ip)
+			return err
+		}
+		return writeJSONResponse(writer, 201, result)
+	case method == "POST" && path == "/api/v1/auth/webdav-import":
+		if !securePasswordRequest(request) {
+			return apiError(400, "HTTPS is required for WebDAV credentials")
+		}
+		body, err := readObjectBody(request, maxJSONRequestBytes)
+		if err != nil {
+			return err
+		}
+		if err := validateWebDAVBody(body); err != nil {
+			return err
+		}
+		ip := requestIP(request)
+		if !s.authFailureAllowed(ip) {
+			return apiError(429, "too many authentication failures")
+		}
+		result, err := s.authorization("webdav_import", body)
+		if err != nil {
+			s.noteAuthFailure(ip)
 			return err
 		}
 		return writeJSONResponse(writer, 200, result)
@@ -305,11 +316,39 @@ func (s *ManagementServer) dispatch(writer http.ResponseWriter, request *http.Re
 			return err
 		}
 		return writeJSONResponse(writer, 200, result)
-	case method == "GET" && path == "/api/v1/registration/status":
+	case method == "POST" && path == "/api/v1/environment/backup":
+		if _, err := s.requireSession(request, "admin"); err != nil {
+			return err
+		}
+		body, err := readObjectBody(request, maxJSONRequestBytes)
+		if err != nil {
+			return err
+		}
+		if err := validateWebDAVBody(body); err != nil {
+			return err
+		}
+		token, err := readBearer(request)
+		if err != nil {
+			return err
+		}
+		payload := Object{"token": token}
+		for key, value := range body {
+			payload[key] = value
+		}
+		result, err := s.authorization("webdav_backup", payload)
+		if err != nil {
+			return err
+		}
+		return writeJSONResponse(writer, 200, result)
+	case method == "POST" && path == "/api/v1/agent-assets/check":
 		if _, err := s.requireSession(request, "viewer"); err != nil {
 			return err
 		}
-		return writeJSONResponse(writer, 200, Object{"required": len(s.Config.Wallets) == 0, "vm_id": s.Config.VMID, "role": nullableString(map[bool]string{true: "admin"}[len(s.Config.Wallets) == 0])})
+		result, err := checkAgentAssetUpdates(request.Context(), s.Config)
+		if err != nil {
+			return apiError(502, err.Error())
+		}
+		return writeJSONResponse(writer, 200, result)
 	case method == "GET" && (path == "/api/v1/health" || path == "/api/v1/components" || path == "/api/v1/runs" || path == "/api/v1/schedule" || path == "/api/v1/policy"):
 		if _, err := s.requireSession(request, "viewer"); err != nil {
 			return err
@@ -346,6 +385,15 @@ func (s *ManagementServer) dispatch(writer http.ResponseWriter, request *http.Re
 			result["policy_reason"] = reason
 			return writeJSONResponse(writer, 200, result)
 		}
+	case method == "GET" && path == "/api/v1/deployments":
+		if _, err := s.requireSession(request, "viewer"); err != nil {
+			return err
+		}
+		records, err := ListLocalDeployments(s.Config.StateRoot)
+		if err != nil {
+			return apiError(503, "local deployment status is unavailable")
+		}
+		return writeJSONResponse(writer, 200, Object{"deployments": records})
 	case method == "GET" && path == "/api/v1/artifacts":
 		if _, err := s.requireSession(request, "viewer"); err != nil {
 			return err
@@ -408,7 +456,7 @@ func (s *ManagementServer) dispatch(writer http.ResponseWriter, request *http.Re
 		}
 		id, _ := run["id"].(string)
 		if !runIdentifier.MatchString(id) {
-			return apiError(502, "wallet authorization helper returned an invalid run")
+			return apiError(502, "authorization helper returned an invalid run")
 		}
 		trigger := s.Config.ManualTrigger
 		if trigger == "" {
@@ -460,107 +508,11 @@ func (s *ManagementServer) dispatch(writer http.ResponseWriter, request *http.Re
 	}
 }
 
-func (s *ManagementServer) registrationChallenge(addressValue string) (Object, error) {
-	if len(s.Config.Wallets) > 0 {
-		return nil, apiError(409, "registration is already complete")
-	}
-	address, err := NormalizeWalletAddress(addressValue)
-	if err != nil {
-		return nil, apiError(400, err.Error())
-	}
-	s.cleanRegistrationChallenges()
-	issued := isoNow()
-	expires := time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339)
-	id := randomUUID()
-	nonce := UseRandomNonce(24)
-	payload := Object{"action": "register", "address": address, "expires_at": expires, "issued_at": issued, "nonce": nonce, "role": "admin", "vm_binding": sha256Hex(s.Config.VMID)}
-	encoded, _ := CanonicalJSON(payload, false, false)
-	message := "ADE-ENVIRONMENT-REGISTRATION-V1\n" + string(encoded)
-	s.mu.Lock()
-	s.registration[id] = registrationChallenge{address: address, message: message, expires: time.Now().Add(10 * time.Minute), created: time.Now()}
-	s.mu.Unlock()
-	s.cleanRegistrationChallenges()
-	return Object{"challenge_id": id, "address": address, "role": "admin", "message": message, "issued_at": issued, "expires_at": expires}, nil
-}
-
-func (s *ManagementServer) cleanRegistrationChallenges() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now()
-	for id, challenge := range s.registration {
-		if !challenge.expires.After(now) {
-			delete(s.registration, id)
-		}
-	}
-	for len(s.registration) > 32 {
-		oldest := ""
-		var created time.Time
-		for id, challenge := range s.registration {
-			if oldest == "" || challenge.created.Before(created) {
-				oldest = id
-				created = challenge.created
-			}
-		}
-		delete(s.registration, oldest)
-	}
-}
-
-func (s *ManagementServer) registerWallet(body Object) (Object, error) {
-	address, err := NormalizeWalletAddress(body["address"])
-	if err != nil {
-		return nil, apiError(400, err.Error())
-	}
-	id, _ := body["challenge_id"].(string)
-	message, _ := body["message"].(string)
-	signature, _ := body["signature"].(string)
-	s.mu.Lock()
-	challenge, ok := s.registration[id]
-	s.mu.Unlock()
-	if !ok || challenge.address != address || challenge.message != message || !challenge.expires.After(time.Now()) {
-		return nil, apiError(400, "registration challenge is invalid")
-	}
-	helper := s.Config.RegistrationTrigger
-	if helper == "" {
-		helper = "/usr/local/sbin/agent-environment-enroll"
-	}
-	request := Object{"address": address, "message": message, "signature": signature}
-	data, _ := json.Marshal(request)
-	ctx, cancel := context.WithTimeout(context.Background(), 65*time.Second)
-	defer cancel()
-	command := exec.CommandContext(ctx, "/usr/bin/sudo", "-n", helper)
-	command.Dir = s.Config.SourceRoot
-	command.Stdin = strings.NewReader(string(data))
-	var stdout, stderr limitedBuffer
-	stdout.limit = 1024 * 1024
-	stderr.limit = 1024 * 1024
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	if err := command.Run(); err != nil {
-		return nil, apiError(400, "wallet registration failed")
-	}
-	if _, err := DecodeJSON(stdout.Bytes()); err != nil {
-		return nil, apiError(502, "wallet registration helper returned invalid JSON")
-	}
-	s.mu.Lock()
-	delete(s.registration, id)
-	s.status = map[string]statusEntry{}
-	s.mu.Unlock()
-	fresh, err := LoadEnvironmentConfig(s.Config.Path)
-	if err == nil {
-		s.Config = fresh
-	}
-	return Object{"registered": true, "address": address, "role": "admin", "login_required": true}, nil
-}
-
 func (s *ManagementServer) verifyAuth(body Object, ip string) (Object, error) {
-	address, err := NormalizeWalletAddress(body["address"])
-	if err != nil {
-		return nil, apiError(400, err.Error())
-	}
 	if !s.authFailureAllowed(ip) {
 		return nil, apiError(429, "too many authentication failures")
 	}
-	result, err := s.authorization("login", Object{"challenge_id": body["challenge_id"], "address": address, "message": body["message"], "signature": body["signature"]})
+	result, err := s.authorization("login", Object{"username": body["username"], "password": body["password"]})
 	if err != nil {
 		s.noteAuthFailure(ip)
 		return nil, err
@@ -728,16 +680,6 @@ func loadTLSConfig(cert, key string) (*tls.Config, error) {
 	return &tls.Config{MinVersion: tls.VersionTLS12}, nil
 }
 
-func queryExactlyOnce(request *http.Request, key string, required bool) (string, error) {
-	values := request.URL.Query()[key]
-	if len(values) > 1 || required && len(values) != 1 {
-		return "", apiError(400, key+" must be specified once")
-	}
-	if len(values) == 0 {
-		return "", nil
-	}
-	return values[0], nil
-}
 func requestIP(request *http.Request) string {
 	host, _, err := net.SplitHostPort(request.RemoteAddr)
 	if err != nil {
@@ -752,6 +694,18 @@ func requestIP(request *http.Request) string {
 		}
 	}
 	return host
+}
+
+func securePasswordRequest(request *http.Request) bool {
+	if request.TLS != nil {
+		return true
+	}
+	host, _, err := net.SplitHostPort(request.RemoteAddr)
+	if err != nil {
+		host = request.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback() && strings.EqualFold(strings.TrimSpace(request.Header.Get("X-Forwarded-Proto")), "https")
 }
 
 func readObjectBody(request *http.Request, limit int64) (Object, error) {
@@ -787,16 +741,36 @@ func validateAllowedFields(body Object, allowed ...string) error {
 	}
 	return nil
 }
-func validateSignatureBody(body Object) error {
-	if err := validateAllowedFields(body, "challenge_id", "address", "message", "signature"); err != nil {
+func validateLoginBody(body Object) error {
+	if err := validateAllowedFields(body, "username", "password"); err != nil {
 		return err
 	}
-	id, _ := body["challenge_id"].(string)
-	address, _ := body["address"].(string)
-	message, _ := body["message"].(string)
-	signature, _ := body["signature"].(string)
-	if len(id) < 1 || len(id) > 128 || !walletAddressPattern.MatchString(address) || len(message) < 1 || len(message) > 4096 || len(signature) < 1 || len(signature) > 512 {
-		return apiError(400, "request body is invalid")
+	username, err := normalizeUsername(body["username"])
+	password, passwordOK := body["password"].(string)
+	if err != nil || username == "" || !passwordOK || len(password) < 12 || len(password) > 1024 {
+		return apiError(400, "username or password is invalid")
+	}
+	return nil
+}
+func validateWebDAVBody(body Object) error {
+	if err := validateAllowedFields(body, "webdav_url", "webdav_username", "webdav_password", "backup_passphrase"); err != nil {
+		return err
+	}
+	if _, err := webDAVURL(body["webdav_url"]); err != nil {
+		return apiError(400, err.Error())
+	}
+	if body["webdav_username"] == nil {
+		body["webdav_username"] = ""
+	}
+	if body["webdav_password"] == nil {
+		body["webdav_password"] = ""
+	}
+	if _, _, err := webDAVCredentials(body); err != nil {
+		return apiError(400, err.Error())
+	}
+	passphrase, ok := body["backup_passphrase"].(string)
+	if !ok || len(passphrase) < environmentBackupPassMinSize || len(passphrase) > 1024 {
+		return apiError(400, "backup passphrase must be between 12 and 1024 bytes")
 	}
 	return nil
 }

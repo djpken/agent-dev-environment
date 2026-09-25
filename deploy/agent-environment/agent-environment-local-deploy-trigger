@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+config_file=/etc/ade/agent-environment-local-deploy.env
+[[ -r "$config_file" ]] || { echo 'local deployment is not installed' >&2; exit 1; }
+source "$config_file"
+
+[[ $(id -u) == 0 ]] || { echo 'local deployment trigger must run as root' >&2; exit 1; }
+[[ $# -eq 1 && "$1" =~ ^[0-9a-f]{40}$ ]] || {
+  echo 'usage: agent-environment-local-deploy-trigger <commit-sha>' >&2
+  exit 2
+}
+sha=$1
+
+git_repo() { /usr/bin/git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT" "$@"; }
+git_repo cat-file -e "$sha^{commit}" || { echo 'commit is not present in the local repository' >&2; exit 1; }
+
+state_directory=$STATE_ROOT/local-deployments
+record_file=$state_directory/$sha.json
+install -d -o root -g orca -m 0750 "$state_directory"
+exec 9>"$state_directory/trigger.lock"
+flock -x 9
+if [[ -e "$record_file" ]]; then
+  echo "commit $sha already has a deployment attempt"
+  exit 0
+fi
+
+subject=$(git_repo show -s --format=%s "$sha")
+/usr/local/sbin/agent-environment-local-deploy-state \
+  --state-root "$STATE_ROOT" --sha "$sha" --status queued --stage queued --subject "$subject"
+
+unit_name=agent-environment-local-deploy-$sha.service
+if ! /usr/bin/systemd-run --quiet --no-block --collect --unit="$unit_name" \
+  /usr/local/sbin/agent-environment-local-deploy "$sha"; then
+  /usr/local/sbin/agent-environment-local-deploy-state \
+    --state-root "$STATE_ROOT" --sha "$sha" --status failed --stage queue \
+    --error '無法啟動本機部署工作'
+  exit 1
+fi
+
+echo "Queued local deployment for $sha"

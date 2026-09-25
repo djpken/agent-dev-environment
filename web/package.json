@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@fluentui/react-components": "^9.74.9",
-    "@metamask/connect-evm": "^2.1.1",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

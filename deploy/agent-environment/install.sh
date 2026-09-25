@@ -152,9 +152,6 @@ install -o root -g root -m 0755 \
   "$source_root/deploy/agent-environment/agent-environment-trigger" \
   /usr/local/sbin/agent-environment-trigger
 install -o root -g root -m 0755 \
-  "$source_root/deploy/agent-environment/agent-environment-enroll" \
-  /usr/local/sbin/agent-environment-enroll
-install -o root -g root -m 0755 \
   "$source_root/deploy/agent-environment/agent-environment-authorize" \
   /usr/local/sbin/agent-environment-authorize
 install -o root -g root -m 0755 \

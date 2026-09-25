@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+import argparse
+import datetime
+import grp
+import json
+import os
+import re
+import tempfile
+
+
+def utc_now():
+    return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--state-root", required=True)
+parser.add_argument("--sha", required=True)
+parser.add_argument("--status", required=True, choices=("queued", "running", "succeeded", "failed", "skipped"))
+parser.add_argument("--stage", default="")
+parser.add_argument("--subject", default="")
+parser.add_argument("--error", default="")
+args = parser.parse_args()
+
+if not re.fullmatch(r"[0-9a-f]{40}", args.sha):
+    raise SystemExit("invalid commit SHA")
+
+directory = os.path.join(args.state_root, "local-deployments")
+os.makedirs(directory, mode=0o750, exist_ok=True)
+path = os.path.join(directory, args.sha + ".json")
+now = utc_now()
+try:
+    with open(path, encoding="utf-8") as record_file:
+        record = json.load(record_file)
+except FileNotFoundError:
+    record = {"sha": args.sha, "queued_at": now}
+
+if record.get("sha") != args.sha:
+    raise SystemExit("deployment record does not match commit SHA")
+if args.subject:
+    record["subject"] = args.subject[:200]
+record["status"] = args.status
+if args.stage:
+    record["stage"] = args.stage
+if args.status == "running" and not record.get("started_at"):
+    record["started_at"] = now
+if args.status in ("succeeded", "failed", "skipped"):
+    record["finished_at"] = now
+if args.error:
+    record["error"] = args.error[:500]
+else:
+    record.pop("error", None)
+
+fd, temporary = tempfile.mkstemp(prefix=".deployment-", dir=directory, text=True)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as record_file:
+        json.dump(record, record_file, ensure_ascii=False, separators=(",", ":"))
+        record_file.write("\n")
+        record_file.flush()
+        os.fsync(record_file.fileno())
+        os.fchown(record_file.fileno(), 0, grp.getgrnam("orca").gr_gid)
+        os.fchmod(record_file.fileno(), 0o640)
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)

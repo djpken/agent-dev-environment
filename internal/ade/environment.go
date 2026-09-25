@@ -49,6 +49,7 @@ type EnvironmentConfig struct {
 	Path                 string
 	VMID                 string
 	SourceRoot           string
+	ADERoot              string
 	StateRoot            string
 	PublicOrigin         string
 	AllowedOrigins       []string
@@ -60,7 +61,6 @@ type EnvironmentConfig struct {
 	TLS                  Object
 	AllowHTTP            bool
 	ManualTrigger        string
-	RegistrationTrigger  string
 	AuthorizationTrigger string
 	Artifacts            Object
 	Raw                  Object
@@ -97,6 +97,17 @@ func LoadEnvironmentConfig(path string) (*EnvironmentConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	adeRoot, _ := raw["ade_root"].(string)
+	if adeRoot == "" {
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			return nil, fmt.Errorf("could not determine ADE user home")
+		}
+		adeRoot = filepath.Join(home, ".local", "share", "ade")
+	} else if !filepath.IsAbs(adeRoot) {
+		return nil, fmt.Errorf("ade_root must be an absolute path")
+	}
+	adeRoot = filepath.Clean(adeRoot)
 	stateRoot, _ := raw["state_root"].(string)
 	if stateRoot == "" {
 		stateRoot = "/var/lib/ade/agent-environment"
@@ -193,10 +204,6 @@ func LoadEnvironmentConfig(path string) (*EnvironmentConfig, error) {
 	if manual == "" {
 		manual = "/usr/local/sbin/agent-environment-trigger"
 	}
-	registration, _ := raw["registration_trigger"].(string)
-	if registration == "" {
-		registration = "/usr/local/sbin/agent-environment-enroll"
-	}
 	authorization, _ := raw["authorization_trigger"].(string)
 	if authorization == "" {
 		authorization = "/usr/local/sbin/agent-environment-authorize"
@@ -205,7 +212,7 @@ func LoadEnvironmentConfig(path string) (*EnvironmentConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &EnvironmentConfig{Path: abs, VMID: vmID, SourceRoot: source, StateRoot: stateRoot, PublicOrigin: origin, AllowedOrigins: allowedOrigins, Components: components, Wallets: walletItems, Schedule: schedule, Snapshot: snapshot, Listen: listen, TLS: tls, AllowHTTP: boolValue(raw["allow_http"]), ManualTrigger: manual, RegistrationTrigger: registration, AuthorizationTrigger: authorization, Artifacts: artifacts, Raw: raw}, nil
+	return &EnvironmentConfig{Path: abs, VMID: vmID, SourceRoot: source, ADERoot: adeRoot, StateRoot: stateRoot, PublicOrigin: origin, AllowedOrigins: allowedOrigins, Components: components, Wallets: walletItems, Schedule: schedule, Snapshot: snapshot, Listen: listen, TLS: tls, AllowHTTP: boolValue(raw["allow_http"]), ManualTrigger: manual, AuthorizationTrigger: authorization, Artifacts: artifacts, Raw: raw}, nil
 }
 
 func parseComponent(value Object) (*Component, error) {
@@ -351,7 +358,7 @@ func (config *EnvironmentConfig) ComponentMap() map[string]*Component {
 	return result
 }
 func (config *EnvironmentConfig) PublicConfig() Object {
-	return Object{"version": EnvironmentVersion, "vm_id": config.VMID, "public_origin": config.PublicOrigin, "registration_required": len(config.Wallets) == 0, "schedule": Object{"time": "04:00", "timezone": "UTC+8", "persistent": true}, "snapshot": Object{"enabled": boolValue(config.Snapshot["enabled"])}}
+	return Object{"version": EnvironmentVersion, "vm_id": config.VMID, "public_origin": config.PublicOrigin, "schedule": Object{"time": "04:00", "timezone": "UTC+8", "persistent": true}, "snapshot": Object{"enabled": boolValue(config.Snapshot["enabled"])}}
 }
 
 func commandEnvironment() []string { return []string{"PATH=" + fixedEnvironmentPath} }

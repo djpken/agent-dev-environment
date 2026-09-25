@@ -1,16 +1,18 @@
-"""Root-owned authentication and operation approvals for the ADES service.
+"""Root-owned account authentication and operation approvals for ADES.
 
-The Node.js management server calls a fixed privileged helper over stdin. Only
-token hashes are persisted. Run history is untrusted input; an immutable,
-one-use approval binds every manual execution to a live session. Policies have
-a separate lifetime.
+The management server calls a fixed privileged helper over stdin. Only token
+hashes are persisted. Run history is untrusted input; an immutable, one-use
+approval binds each manual execution to a live session. Policies have a
+separate lifetime.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import base64
 import hashlib
 import os
+import re
 import secrets
 import stat
 import uuid
@@ -21,7 +23,12 @@ from . import environment as env
 
 
 SESSION_HOURS = 12
-SESSION_SCOPE = "Manage this VM within your wallet role for 12 hours. Scheduled updates remain enabled until disabled."
+PASSWORD_SCRYPT_N = 1 << 15
+PASSWORD_SCRYPT_R = 8
+PASSWORD_SCRYPT_P = 1
+PASSWORD_HASH_BYTES = 32
+USERNAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._@+-]{0,127}$")
+UNKNOWN_ACCOUNT_SALT = b"ade-unknown-account-v1"
 
 
 class EnvironmentAuthority:
@@ -42,6 +49,7 @@ class EnvironmentAuthority:
         self.state_path = self.root / "sessions.json"
         self.lock_path = self.root / ".lock"
         self.policy_path = self.root / "policy.json"
+        self.accounts_path = self.root / "accounts.json"
 
     def _check_path(self, path: Path, *, directory: bool = False) -> None:
         info = path.lstat()
@@ -54,11 +62,11 @@ class EnvironmentAuthority:
             self._check_path(self.state_path)
             if self.state_path.stat().st_mode & 0o077:
                 raise env.EnvironmentError("session storage must be private to its owner")
-        state = env._read_json(self.state_path, {"vm_id": self.config.vm_id, "challenges": {}, "sessions": {}, "approvals": {}})
+        state = env._read_json(self.state_path, {"vm_id": self.config.vm_id, "sessions": {}, "approvals": {}})
         if state.get("vm_id") != self.config.vm_id:
             raise env.EnvironmentError("session storage VM identity does not match")
         now = env.utc_now()
-        for group in ("challenges", "sessions", "approvals"):
+        for group in ("sessions", "approvals"):
             state[group] = {key: value for key, value in state[group].items()
                             if env.parse_timestamp(value["expires_at"]) > now}
         return state
@@ -66,62 +74,114 @@ class EnvironmentAuthority:
     @staticmethod
     def token_id(token: Any) -> str:
         if not isinstance(token, str) or not 32 <= len(token) <= 128:
-            raise env.EnvironmentError("wallet session expired")
+            raise env.EnvironmentError("session expired")
         return hashlib.sha256(token.encode()).hexdigest()
+
+    @staticmethod
+    def normalize_username(value: Any) -> str:
+        if not isinstance(value, str):
+            raise env.EnvironmentError("invalid credentials")
+        username = value.strip().lower()
+        if not USERNAME_PATTERN.fullmatch(username):
+            raise env.EnvironmentError("invalid credentials")
+        return username
+
+    @staticmethod
+    def _password_hash(password: str, salt: bytes) -> bytes:
+        return hashlib.scrypt(password.encode(), salt=salt, n=PASSWORD_SCRYPT_N,
+                              r=PASSWORD_SCRYPT_R, p=PASSWORD_SCRYPT_P,
+                              dklen=PASSWORD_HASH_BYTES, maxmem=64 * 1024 * 1024)
+
+    def _load_accounts(self) -> dict[str, Any]:
+        if not self.accounts_path.exists():
+            return {}
+        self._check_path(self.accounts_path)
+        if self.accounts_path.stat().st_mode & 0o077:
+            raise env.EnvironmentError("account storage must be private to its owner")
+        stored = env._read_json(self.accounts_path, {})
+        if stored.get("vm_id") != self.config.vm_id or not isinstance(stored.get("users"), dict):
+            raise env.EnvironmentError("account storage is invalid")
+        users = stored["users"]
+        for username, account in users.items():
+            if (not isinstance(account, dict) or account.get("username") != username
+                    or not USERNAME_PATTERN.fullmatch(username) or account.get("role") not in env.ROLES
+                    or not isinstance(account.get("credential_id"), str)
+                    or account.get("hash_version") != 1):
+                raise env.EnvironmentError("account storage is invalid")
+            try:
+                salt = base64.b64decode(account["salt"] + "===")
+                password_hash = base64.b64decode(account["password_hash"] + "===")
+            except (KeyError, ValueError, TypeError) as exc:
+                raise env.EnvironmentError("account storage is invalid") from exc
+            if len(salt) != 16 or len(password_hash) != PASSWORD_HASH_BYTES:
+                raise env.EnvironmentError("account storage is invalid")
+        return users
+
+    def set_account(self, username: str, password: str, role: str = "admin") -> None:
+        if os.geteuid() != self.owner:
+            raise env.EnvironmentError("account setup requires the config owner")
+        normalized = self.normalize_username(username)
+        if role not in env.ROLES:
+            raise env.EnvironmentError("role must be viewer, operator, or admin")
+        if not isinstance(password, str) or not 12 <= len(password.encode()) <= 1024:
+            raise env.EnvironmentError("password must be between 12 and 1024 bytes")
+        with env._locked(self.lock_path):
+            state = self._load()
+            users = self._load_accounts()
+            salt = secrets.token_bytes(16)
+            users[normalized] = {
+                "username": normalized,
+                "role": role,
+                "credential_id": str(uuid.uuid4()),
+                "hash_version": 1,
+                "salt": base64.b64encode(salt).decode().rstrip("="),
+                "password_hash": base64.b64encode(self._password_hash(password, salt)).decode().rstrip("="),
+            }
+            env._write_json(self.accounts_path, {"vm_id": self.config.vm_id, "users": users}, 0o600)
+            removed = set()
+            for session_id, session in list(state["sessions"].items()):
+                if session.get("username") == normalized:
+                    del state["sessions"][session_id]
+                    removed.add(session_id)
+            state["approvals"] = {
+                run_id: approval for run_id, approval in state["approvals"].items()
+                if approval.get("session_id") not in removed
+            }
+            env._write_json(self.state_path, state, 0o600)
 
     def _session(self, state: Mapping[str, Any], session_id: str, role: str = "viewer") -> dict[str, Any]:
         session = state["sessions"].get(session_id)
         if not session or env.parse_timestamp(session["expires_at"]) <= env.utc_now():
-            raise env.EnvironmentError("wallet session expired")
-        current_role = env.wallet_role(self.config, session["address"])
-        if current_role is None:
-            raise env.EnvironmentError("wallet is not enrolled for this VM")
+            raise env.EnvironmentError("session expired")
+        account = self._load_accounts().get(session["username"])
+        if not account or session.get("account_version") != account["credential_id"]:
+            raise env.EnvironmentError("session is no longer valid")
         rank = {"viewer": 0, "operator": 1, "admin": 2}
-        effective_role = min((session["role"], current_role), key=rank.__getitem__)
-        if rank[effective_role] < rank[role]:
-            raise env.EnvironmentError(f"wallet role {role} required")
-        return {**session, "role": effective_role}
-
-    def _challenge(self, state: dict[str, Any], request: Mapping[str, Any]) -> dict[str, Any]:
-        address = env.normalize_wallet_address(request.get("address"))
-        origin = request.get("origin") or self.config.public_origin
-        if origin not in (self.config.public_origin, *self.config.allowed_origins):
-            raise env.EnvironmentError("origin is not allowed")
-        if len(state["challenges"]) >= 1000:
-            raise env.EnvironmentError("too many pending authentication challenges")
-        challenge_id = str(uuid.uuid4())
-        challenge = {
-            "challenge_id": challenge_id, "address": address,
-            "issued_at": env.iso_now(),
-            "expires_at": (env.utc_now() + dt.timedelta(minutes=10)).isoformat(),
-        }
-        challenge["message"] = "ADE-ENVIRONMENT-SESSION-V1\n" + env._json_bytes({
-            **challenge, "action": "login", "origin": origin,
-            "vm_binding": hashlib.sha256(self.config.vm_id.encode()).hexdigest(),
-            "nonce": secrets.token_urlsafe(24), "scope": SESSION_SCOPE,
-        }).decode()
-        state["challenges"][challenge_id] = challenge
-        return dict(challenge)
+        current_role = account["role"]
+        if rank[current_role] < rank[role]:
+            raise env.EnvironmentError(f"account role {role} required")
+        return {"username": session["username"], "role": current_role,
+                "expires_at": session["expires_at"]}
 
     def _login(self, state: dict[str, Any], request: Mapping[str, Any]) -> dict[str, Any]:
-        address = env.normalize_wallet_address(request.get("address"))
-        challenge_id, message, signature = (request.get(key) for key in ("challenge_id", "message", "signature"))
-        if not all(isinstance(value, str) for value in (challenge_id, message, signature)):
-            raise env.EnvironmentError("challenge_id, address, message, and signature are required")
-        challenge = state["challenges"].get(challenge_id)
-        if not challenge or challenge["address"] != address or not secrets.compare_digest(challenge["message"], message):
-            raise env.EnvironmentError("authentication challenge is invalid")
-        if not env.verify_wallet_signature(address, message.encode(), signature):
-            raise env.EnvironmentError("wallet signature is invalid")
-        role = env.wallet_role(self.config, address)
-        if role is None:
-            raise env.EnvironmentError("wallet is not enrolled for this VM")
+        username = self.normalize_username(request.get("username"))
+        password = request.get("password")
+        if not isinstance(password, str) or not password:
+            raise env.EnvironmentError("invalid credentials")
+        account = self._load_accounts().get(username)
+        salt = (base64.b64decode(account["salt"] + "===") if account
+                else UNKNOWN_ACCOUNT_SALT)
+        actual = self._password_hash(password, salt)
+        if not account or not secrets.compare_digest(
+                actual, base64.b64decode(account["password_hash"] + "===")):
+            raise env.EnvironmentError("invalid credentials")
         token = secrets.token_urlsafe(32)
-        session = {"address": address, "role": role,
+        session = {"username": username, "role": account["role"],
+                   "account_version": account["credential_id"],
                    "expires_at": (env.utc_now() + dt.timedelta(hours=SESSION_HOURS)).isoformat()}
-        del state["challenges"][challenge_id]
         state["sessions"][self.token_id(token)] = session
-        return {"session": token, **session}
+        return {"session": token, "username": username, "role": account["role"],
+                "expires_at": session["expires_at"]}
 
     def _selection(self, request: Mapping[str, Any], *, policy: bool = False) -> tuple[str, list[str], dict[str, str]]:
         action = "update" if policy else request.get("action", "update")
@@ -153,9 +213,7 @@ class EnvironmentAuthority:
             operation = request.get("operation")
             if not isinstance(operation, str):
                 raise env.EnvironmentError("authorization operation must be text")
-            if operation == "challenge":
-                result = self._challenge(state, request)
-            elif operation == "login":
+            if operation == "login":
                 result = self._login(state, request)
             else:
                 session_id = self.token_id(request.get("token"))
@@ -173,7 +231,7 @@ class EnvironmentAuthority:
                         action, ids, targets = self._selection(request)
                         store = env.RunStore(self.config.state_root)
                         run = env.UpdateCoordinator(self.config, store).create_run(
-                            "manual", ids, session["address"], action, targets, {"kind": "session"})
+                            "manual", ids, session["username"], action, targets, {"kind": "session"})
                         state["approvals"][run["id"]] = {
                             "binding": self.run_binding(run), "session_id": session_id,
                             "expires_at": session["expires_at"],
@@ -197,7 +255,7 @@ class EnvironmentAuthority:
                             policy = {"components": [], "target_versions": {},
                                       "release_channel": "stable", "allow_restart": True}
                         policy.update(policy_id=str(uuid.uuid4()), vm_id=self.config.vm_id,
-                                      enabled=enabled, signer=session["address"],
+                                      enabled=enabled, signer=session["username"],
                                       authorization="session", updated_at=env.iso_now())
                         env._write_json(self.policy_path, policy, 0o644)
                         result = env._policy_public(policy, self.config)
