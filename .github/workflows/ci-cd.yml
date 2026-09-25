@@ -35,6 +35,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes bubblewrap
+          sudo chmod u+s "$(command -v bwrap)"
 
       - name: Check bubblewrap namespace support
         run: |
