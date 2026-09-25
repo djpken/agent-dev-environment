@@ -36,6 +36,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes bubblewrap
 
+      - name: Check bubblewrap namespace support
+        run: |
+          stat -c '%A %U:%G %n' "$(command -v bwrap)"
+          bwrap --unshare-all --die-with-parent --new-session \
+            --ro-bind /usr /usr --proc /proc --dev /dev --tmpfs /tmp \
+            -- /usr/bin/true
+
       - name: Run Python tests
         run: uv run --frozen python -m unittest discover -s tests -v
 
