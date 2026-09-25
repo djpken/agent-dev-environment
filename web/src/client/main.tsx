@@ -15,6 +15,7 @@ import {
   type BadgeProps,
   type BrandVariants,
 } from '@fluentui/react-components';
+import type { MetamaskConnectEVM } from '@metamask/connect-evm';
 import './styles.css';
 
 type Role = 'viewer' | 'operator' | 'admin';
@@ -68,6 +69,25 @@ class ApiError extends Error {
 const SESSION_KEY = 'ade.environment.session.v1';
 const MAX_UPLOAD_FILES = 200;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const METAMASK_CONNECT_RPC_URL = import.meta.env.VITE_METAMASK_CONNECT_RPC_URL || 'https://ethereum-rpc.publicnode.com';
+let metaMaskConnectClientPromise: Promise<MetamaskConnectEVM> | undefined;
+
+function getMetaMaskConnectClient(): Promise<MetamaskConnectEVM> {
+  if (!metaMaskConnectClientPromise) {
+    metaMaskConnectClientPromise = import('@metamask/connect-evm')
+      .then(({ createEVMClient }) => createEVMClient({
+        dapp: { name: 'ADES', url: window.location.origin },
+        api: { supportedNetworks: { '0x1': METAMASK_CONNECT_RPC_URL } },
+        analytics: { enabled: false },
+        skipAutoAnnounce: true,
+      }))
+      .catch((error: unknown) => {
+        metaMaskConnectClientPromise = undefined;
+        throw error;
+      });
+  }
+  return metaMaskConnectClientPromise;
+}
 
 const adeBrand: BrandVariants = {
   10: '#071e11', 20: '#0a301a', 30: '#104624', 40: '#175b30',
@@ -91,11 +111,6 @@ function getWalletProvider(): WalletProvider | undefined {
   if (!ethereum) return undefined;
   return ethereum.providers?.find((provider) => provider.isMetaMask && !provider.isRabby) ??
     (ethereum.isMetaMask && !ethereum.isRabby ? ethereum : undefined);
-}
-
-function isAppleMobileDevice(): boolean {
-  return /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
 function encodeMessage(message: string): string {
@@ -155,7 +170,6 @@ function App() {
   const [registrationRequired, setRegistrationRequired] = useState<boolean | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [authMessage, setAuthMessage] = useState('');
-  const [showMetaMaskBrowserLink, setShowMetaMaskBrowserLink] = useState(false);
   const [globalError, setGlobalError] = useState('');
   const [health, setHealth] = useState<Health | null>(null);
   const [schedule, setSchedule] = useState<Schedule | null>(null);
@@ -178,6 +192,7 @@ function App() {
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const providerRef = useRef<WalletProvider | undefined>(undefined);
+  const metaMaskConnectClientRef = useRef<MetamaskConnectEVM | null>(null);
   const accountRef = useRef<string | null>(null);
   const operationRef = useRef(0);
   const trendRequestRef = useRef(0);
@@ -278,7 +293,11 @@ function App() {
     const accounts = Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
     const current = sessionRef.current;
     const activeAddress = current?.address ?? accountRef.current;
-    const nextAddress = accounts[0]?.toLowerCase() ?? null;
+    const sdkClient = metaMaskConnectClientRef.current;
+    const selectedAccount = providerRef.current === sdkClient?.getProvider()
+      ? sdkClient?.getAccount()
+      : undefined;
+    const nextAddress = selectedAccount?.toLowerCase() ?? accounts[0]?.toLowerCase() ?? null;
     if (!activeAddress || activeAddress === nextAddress) return;
     accountRef.current = nextAddress;
     clearSession('MetaMask 帳號已變更，請重新連接。');
@@ -314,6 +333,11 @@ function App() {
     window.dispatchEvent(new Event('eip6963:requestProvider'));
     const detected = getWalletProvider();
     if (detected) attachProvider(detected);
+    else {
+      void getMetaMaskConnectClient()
+        .then((client) => { metaMaskConnectClientRef.current = client; })
+        .catch(() => undefined);
+    }
 
     let saved: WalletSession | undefined;
     try { saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null') as WalletSession | undefined; } catch { /* Ignore malformed local state. */ }
@@ -326,7 +350,12 @@ function App() {
           if (provider) {
             attachProvider(provider);
             const accounts = await provider.request({ method: 'eth_accounts' }) as string[];
-            if (accounts[0]?.toLowerCase() !== restored.address) {
+            const sdkClient = metaMaskConnectClientRef.current;
+            const selectedAccount = provider === sdkClient?.getProvider()
+              ? sdkClient?.getAccount()
+              : undefined;
+            const currentAddress = selectedAccount?.toLowerCase() ?? accounts[0]?.toLowerCase();
+            if (currentAddress !== restored.address) {
               clearSession('MetaMask 帳號與目前 session 不一致，請重新登入。');
               void revoke(saved!.session).catch(() => undefined);
               return;
@@ -395,7 +424,12 @@ function App() {
 
   async function signWithWallet(provider: WalletProvider, address: string, message: string): Promise<string> {
     const accounts = await provider.request({ method: 'eth_accounts' }) as string[];
-    if (accounts[0]?.toLowerCase() !== address) throw new Error('MetaMask 帳號已變更，請重新連接。');
+    const sdkClient = metaMaskConnectClientRef.current;
+    const selectedAccount = provider === sdkClient?.getProvider()
+      ? sdkClient?.getAccount()
+      : undefined;
+    const currentAddress = selectedAccount?.toLowerCase() ?? accounts[0]?.toLowerCase();
+    if (currentAddress !== address) throw new Error('MetaMask 帳號已變更，請重新連接。');
     const signature = await provider.request({ method: 'personal_sign', params: [encodeMessage(message), address] });
     if (typeof signature !== 'string') throw new Error('MetaMask 未回傳簽章。');
     return signature;
@@ -422,28 +456,34 @@ function App() {
     if (connecting || session) return;
     const operation = ++operationRef.current;
     setConnecting(true);
-    setAuthMessage('請在 MetaMask 確認連線。');
-    setShowMetaMaskBrowserLink(false);
+    setAuthMessage('正在連接 MetaMask。核准後會回到 ADES。');
     setGlobalError('');
     try {
-      const provider = providerRef.current ?? getWalletProvider();
-      if (!provider) {
-        const appleMobile = isAppleMobileDevice();
-        setShowMetaMaskBrowserLink(appleMobile);
-        throw new Error(appleMobile
-          ? 'iOS 主畫面 PWA 沒有瀏覽器 wallet extension。請用下方連結在 MetaMask App 開啟 ADES。'
-          : '找不到 MetaMask。請安裝或啟用 MetaMask 後重新載入頁面。');
+      let provider: WalletProvider;
+      let address: string | undefined;
+      const injectedProvider = getWalletProvider() ?? providerRef.current;
+      if (injectedProvider) {
+        provider = injectedProvider;
+        attachProvider(provider);
+        const accounts = await provider.request({ method: 'eth_requestAccounts' }) as string[];
+        address = accounts[0];
+      } else {
+        const client = metaMaskConnectClientRef.current ?? await getMetaMaskConnectClient();
+        metaMaskConnectClientRef.current = client;
+        setAuthMessage('正在開啟 MetaMask。核准連線後會回到 ADES。');
+        const connection = await client.connect({ chainIds: ['0x1'] });
+        provider = client.getProvider();
+        attachProvider(provider);
+        address = client.getAccount() ?? connection.accounts[0];
       }
-      attachProvider(provider);
-      const accounts = await provider.request({ method: 'eth_requestAccounts' }) as string[];
       if (operationRef.current !== operation) return;
-      const address = accounts[0]?.toLowerCase();
-      if (!address) throw new Error('MetaMask 沒有回傳帳號。');
-      accountRef.current = address;
+      const normalizedAddress = address?.toLowerCase();
+      if (!normalizedAddress) throw new Error('MetaMask 沒有回傳帳號。');
+      accountRef.current = normalizedAddress;
       let registration: { challenge_id: string; message: string } | undefined;
       try {
         registration = await api<{ challenge_id: string; message: string }>(
-          '/api/v1/registration/challenge?address=' + encodeURIComponent(address),
+          '/api/v1/registration/challenge?address=' + encodeURIComponent(normalizedAddress),
         );
       } catch (error) {
         if (!(error instanceof ApiError) || error.status !== 409) throw error;
@@ -451,18 +491,18 @@ function App() {
       }
       if (registration) {
         setRegistrationRequired(true);
-        setAuthMessage('請在 MetaMask 簽署首次註冊訊息。');
-        const signature = await signWithWallet(provider, address, registration.message);
+        setAuthMessage('請在 MetaMask 確認簽署，完成後會回到 ADES。');
+        const signature = await signWithWallet(provider, normalizedAddress, registration.message);
         if (operationRef.current !== operation) return;
         await api('/api/v1/registration', {
           method: 'POST',
-          body: JSON.stringify({ challenge_id: registration.challenge_id, address, message: registration.message, signature }),
+          body: JSON.stringify({ challenge_id: registration.challenge_id, address: normalizedAddress, message: registration.message, signature }),
         });
         setRegistrationRequired(false);
       }
       if (operationRef.current === operation) {
-        setAuthMessage('請在 MetaMask 簽署登入訊息。');
-        await login(address, provider, operation);
+        setAuthMessage('請在 MetaMask 確認簽署，完成後會回到 ADES。');
+        await login(normalizedAddress, provider, operation);
       }
     } catch (error) {
       if (operationRef.current === operation) setAuthMessage(error instanceof Error ? error.message : String(error));
@@ -631,10 +671,7 @@ function App() {
                   : '使用已授權的 MetaMask wallet 登入，查看環境狀態與管理功能。'}</p>
               <Button appearance="primary" type="button" onClick={() => void connectWallet()} disabled={connecting}>{connecting ? '請在 MetaMask 確認…' : registrationRequired === null ? '連接 MetaMask' : registrationRequired ? '使用 MetaMask 註冊' : '使用 MetaMask 登入'}</Button>
               <p className="auth-message" role="status" aria-live="polite">{authMessage}</p>
-              {showMetaMaskBrowserLink && <a className="auth-wallet-link" href={`https://link.metamask.io/dapp/${location.host}`}>
-                在 MetaMask App 內開啟 ADES
-              </a>}
-              <small>登入 session 最長有效 12 小時，登出後立即撤銷。</small>
+              <small>核准連線與簽署時會切換到 MetaMask App，完成後返回 ADES。登入 session 最長有效 12 小時，登出後立即撤銷。</small>
             </article>
           </section>}
 

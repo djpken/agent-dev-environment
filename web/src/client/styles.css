@@ -58,8 +58,6 @@ main { max-width: 1500px; margin: 0 auto; padding: 24px clamp(20px, 4vw, 58px) c
 .auth-card h2 { margin-bottom: 9px; font-size: 24px; }
 .auth-card > p:not(.auth-tag) { margin-bottom: 18px; font-size: 13px; line-height: 1.65; }
 .auth-message { min-height: 19px; margin: 11px 0 7px !important; color: var(--colorPaletteMarigoldForeground1); font-size: 12px !important; }
-.auth-wallet-link { display: inline-block; margin: 0 0 14px; color: var(--mint); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
-.auth-wallet-link:focus-visible { outline: 2px solid var(--mint); outline-offset: 3px; }
 .auth-card > small { display: block; padding-top: 13px; border-top: 1px solid var(--line); font-size: 11px; }
 
 .panel-shell { display: block; scroll-margin-top: 18px; }
