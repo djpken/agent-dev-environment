@@ -51,6 +51,7 @@ type EnvironmentConfig struct {
 	SourceRoot           string
 	ADERoot              string
 	StateRoot            string
+	LocalDeployRepoRoot  string
 	PublicOrigin         string
 	AllowedOrigins       []string
 	Components           []*Component
@@ -115,6 +116,24 @@ func LoadEnvironmentConfig(path string) (*EnvironmentConfig, error) {
 	stateRoot, err = filepath.Abs(stateRoot)
 	if err != nil {
 		return nil, err
+	}
+	localDeployment := object(raw["local_deployment"])
+	if raw["local_deployment"] != nil && localDeployment == nil {
+		return nil, fmt.Errorf("local_deployment must be an object")
+	}
+	localDeployRepoRoot := ""
+	if localDeployment["repo_root"] != nil {
+		var ok bool
+		localDeployRepoRoot, ok = localDeployment["repo_root"].(string)
+		if !ok {
+			return nil, fmt.Errorf("local_deployment.repo_root must be a string")
+		}
+	}
+	if localDeployRepoRoot != "" {
+		if !filepath.IsAbs(localDeployRepoRoot) {
+			return nil, fmt.Errorf("local_deployment.repo_root must be an absolute path")
+		}
+		localDeployRepoRoot = filepath.Clean(localDeployRepoRoot)
 	}
 	origin, _ := raw["public_origin"].(string)
 	parsedOrigin, err := url.Parse(origin)
@@ -212,7 +231,7 @@ func LoadEnvironmentConfig(path string) (*EnvironmentConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &EnvironmentConfig{Path: abs, VMID: vmID, SourceRoot: source, ADERoot: adeRoot, StateRoot: stateRoot, PublicOrigin: origin, AllowedOrigins: allowedOrigins, Components: components, Wallets: walletItems, Schedule: schedule, Snapshot: snapshot, Listen: listen, TLS: tls, AllowHTTP: boolValue(raw["allow_http"]), ManualTrigger: manual, AuthorizationTrigger: authorization, Artifacts: artifacts, Raw: raw}, nil
+	return &EnvironmentConfig{Path: abs, VMID: vmID, SourceRoot: source, ADERoot: adeRoot, StateRoot: stateRoot, LocalDeployRepoRoot: localDeployRepoRoot, PublicOrigin: origin, AllowedOrigins: allowedOrigins, Components: components, Wallets: walletItems, Schedule: schedule, Snapshot: snapshot, Listen: listen, TLS: tls, AllowHTTP: boolValue(raw["allow_http"]), ManualTrigger: manual, AuthorizationTrigger: authorization, Artifacts: artifacts, Raw: raw}, nil
 }
 
 func parseComponent(value Object) (*Component, error) {

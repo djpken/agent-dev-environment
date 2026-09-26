@@ -9,6 +9,7 @@ User=orca
 Group=orca
 WorkingDirectory=/
 EnvironmentFile=/etc/ade/agent-environment.env
+EnvironmentFile=-/etc/ade/agent-environment-local-deploy.env
 ExecStart=/usr/local/bin/ade-environment-service --config /etc/ade/agent-environment.json
 Restart=on-failure
 RestartSec=5

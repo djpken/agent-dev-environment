@@ -651,6 +651,9 @@ func StartManagementServer(config *EnvironmentConfig, hostOverride string, portO
 	}
 	ui := filepath.Join(config.SourceRoot, "web", "dist", "ui")
 	server := &http.Server{Addr: net.JoinHostPort(host, strconv.Itoa(port)), Handler: NewManagementServer(config, ui), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
+	monitorContext, stopMonitor := context.WithCancel(context.Background())
+	defer stopMonitor()
+	startLocalDeploymentMonitor(monitorContext, config)
 	if cert != "" {
 		tlsConfig, err := loadTLSConfig(cert, key)
 		if err != nil {
@@ -663,6 +666,113 @@ func StartManagementServer(config *EnvironmentConfig, hostOverride string, portO
 	fmt.Printf("ADES Go server listening at http://%s\n", server.Addr)
 	return server.ListenAndServe()
 }
+
+const localDeploymentPollInterval = 5 * time.Second
+
+func startLocalDeploymentMonitor(ctx context.Context, config *EnvironmentConfig) {
+	repoRoot := config.LocalDeployRepoRoot
+	if repoRoot == "" {
+		return
+	}
+	go func() {
+		deployedSHA := deployedCommitSHA(config.SourceRoot)
+		lastReadError := ""
+		readHead := func() (string, bool) {
+			readContext, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			command := exec.CommandContext(readContext, "git", "-C", repoRoot, "rev-parse", "--verify", "HEAD^{commit}")
+			output, err := command.Output()
+			if err != nil {
+				message := err.Error()
+				if message != lastReadError {
+					log.Printf("local deployment monitor cannot read repository HEAD: %v", err)
+					lastReadError = message
+				}
+				return "", false
+			}
+			sha := strings.TrimSpace(string(output))
+			if !isLocalDeploymentSHA(sha) {
+				if lastReadError != "invalid commit SHA" {
+					log.Printf("local deployment monitor received an invalid repository HEAD")
+					lastReadError = "invalid commit SHA"
+				}
+				return "", false
+			}
+			lastReadError = ""
+			return sha, true
+		}
+		queueDeployment := func(sha string) {
+			queueContext, cancel := context.WithTimeout(ctx, 20*time.Second)
+			defer cancel()
+			command := exec.CommandContext(queueContext, "/usr/bin/sudo", "-n", "/usr/local/sbin/agent-environment-local-deploy-trigger", sha)
+			command.Dir = repoRoot
+			output, err := command.CombinedOutput()
+			if err != nil {
+				message := strings.TrimSpace(string(output))
+				if len(message) > 1024 {
+					message = message[:1024]
+				}
+				log.Printf("local deployment monitor could not queue commit %s: %v %s", sha, err, message)
+				return
+			}
+			log.Printf("local deployment monitor queued commit %s", sha)
+		}
+
+		if head, ok := readHead(); ok {
+			if deployedSHA == "" {
+				deployedSHA = head
+			}
+			if head != deployedSHA {
+				queueDeployment(head)
+			}
+			deployedSHA = head
+		}
+		log.Printf("local deployment monitor watching %s every %s", repoRoot, localDeploymentPollInterval)
+		ticker := time.NewTicker(localDeploymentPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				head, ok := readHead()
+				if !ok {
+					continue
+				}
+				if deployedSHA == "" {
+					deployedSHA = head
+					continue
+				}
+				if head == deployedSHA {
+					continue
+				}
+				deployedSHA = head
+				queueDeployment(head)
+			}
+		}
+	}()
+}
+
+func deployedCommitSHA(sourceRoot string) string {
+	sha := filepath.Base(filepath.Clean(sourceRoot))
+	if !isLocalDeploymentSHA(sha) {
+		return ""
+	}
+	return sha
+}
+
+func isLocalDeploymentSHA(value string) bool {
+	if len(value) != 40 {
+		return false
+	}
+	for _, character := range value {
+		if !strings.ContainsRune("0123456789abcdef", character) {
+			return false
+		}
+	}
+	return true
+}
+
 func isLoopbackHost(host string) bool {
 	if host == "localhost" {
 		return true

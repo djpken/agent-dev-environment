@@ -38,22 +38,8 @@ runuser -u orca -- "$git_bin" -C "$repo_root" rev-parse --verify HEAD >/dev/null
   echo 'repo root must contain a commit' >&2
   exit 1
 }
-if runuser -u orca -- "$git_bin" -C "$repo_root" config --get core.hooksPath >/dev/null 2>&1; then
-  echo 'A custom core.hooksPath is configured; install the commit hook there manually.' >&2
-  exit 1
-fi
-
 hooks_dir=$(runuser -u orca -- "$git_bin" -C "$repo_root" rev-parse --path-format=absolute --git-path hooks)
 hook_path=$hooks_dir/post-commit
-if [[ -L "$hook_path" ]]; then
-  echo "Refusing to replace a symlink hook: $hook_path" >&2
-  exit 1
-fi
-if [[ -e "$hook_path" ]] && ! /usr/bin/grep -q 'Managed by ADE local deployment installer' "$hook_path"; then
-  echo "An existing post-commit hook is present: $hook_path" >&2
-  echo 'Preserve it and chain the ADE local deployment hook manually.' >&2
-  exit 1
-fi
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 for script in agent-environment-local-deploy-state agent-environment-local-deploy-trigger agent-environment-local-deploy; do
@@ -82,6 +68,39 @@ printf 'REPO_ROOT=%q\nSTATE_ROOT=%q\nDEPLOYMENTS_ROOT=%q\n' \
 install -o root -g orca -m 0640 "$temporary_config" /etc/ade/agent-environment-local-deploy.env
 rm -f -- "$temporary_config"
 
+python3 - /etc/ade/agent-environment.json "$repo_root" <<'PY'
+import json
+import os
+import stat
+import sys
+import tempfile
+
+path, repo_root = sys.argv[1:]
+with open(path, encoding="utf-8") as config_file:
+    config = json.load(config_file)
+local_deployment = config.get("local_deployment")
+if local_deployment is None:
+    local_deployment = {}
+elif not isinstance(local_deployment, dict):
+    raise SystemExit("local_deployment must be an object")
+local_deployment["repo_root"] = repo_root
+config["local_deployment"] = local_deployment
+metadata = os.stat(path)
+fd, temporary = tempfile.mkstemp(prefix=".agent-environment.", dir=os.path.dirname(path), text=True)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as config_file:
+        json.dump(config, config_file, ensure_ascii=False, indent=2)
+        config_file.write("\n")
+        config_file.flush()
+        os.fsync(config_file.fileno())
+    os.chown(temporary, metadata.st_uid, metadata.st_gid)
+    os.chmod(temporary, stat.S_IMODE(metadata.st_mode))
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+PY
+
 temporary_sudoers=$(mktemp /tmp/agent-environment-local-deploy.sudoers.XXXXXX)
 cat >"$temporary_sudoers" <<'EOF'
 orca ALL=(root) NOPASSWD: /usr/local/sbin/agent-environment-local-deploy-trigger *
@@ -90,21 +109,10 @@ visudo -cf "$temporary_sudoers" >/dev/null
 install -o root -g root -m 0440 "$temporary_sudoers" /etc/sudoers.d/agent-environment-local-deploy
 rm -f -- "$temporary_sudoers"
 
-install -d -o orca -g orca -m 0755 "$hooks_dir"
-temporary_hook=$(mktemp /tmp/agent-environment-post-commit.XXXXXX)
-cat >"$temporary_hook" <<'EOF'
-#!/usr/bin/env bash
-set -Eeuo pipefail
-# Managed by ADE local deployment installer.
-repo_root=$(git rev-parse --show-toplevel)
-commit_sha=$(git -C "$repo_root" rev-parse --verify HEAD)
-if ! /usr/bin/sudo -n /usr/local/sbin/agent-environment-local-deploy-trigger "$commit_sha"; then
-  echo "Commit $commit_sha was created; local deployment could not be queued." >&2
+if [[ -f "$hook_path" && ! -L "$hook_path" ]] \
+  && /usr/bin/grep -qF 'Managed by ADE local deployment installer' "$hook_path"; then
+  rm -f -- "$hook_path"
 fi
-exit 0
-EOF
-install -o orca -g orca -m 0755 "$temporary_hook" "$hook_path"
-rm -f -- "$temporary_hook"
 
 if systemctl is-enabled --quiet agent-environment-cd.timer 2>/dev/null || systemctl is-active --quiet agent-environment-cd.timer; then
   systemctl disable --now agent-environment-cd.timer
@@ -115,6 +123,7 @@ fi
 rm -f /etc/systemd/system/agent-environment-cd.timer /etc/systemd/system/agent-environment-cd.service
 rm -f /usr/local/sbin/agent-environment-cd-pull
 systemctl daemon-reload
+systemctl restart agent-environment.service
 
-echo 'Installed local post-commit deployment and disabled GitHub polling.'
-echo "Commits in $repo_root will deploy once; monitor them in the ADES dashboard."
+echo 'Installed the ADES local commit monitor and disabled GitHub polling.'
+echo "ADES checks $repo_root for new commits every five seconds; monitor deployments in the dashboard."
